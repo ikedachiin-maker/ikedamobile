@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ikedamobile | お申し込み・お支払い</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+      background: #f5f7fa;
+      color: #1a1a2e;
+      line-height: 1.7;
+    }
+
+    /* ─── ヘッダー ─── */
+    header {
+      background: linear-gradient(135deg, #0f3460 0%, #1a6985 100%);
+      color: #fff;
+      text-align: center;
+      padding: 48px 20px 40px;
+    }
+    header .logo {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    header .logo span { color: #4fc3f7; }
+    header p {
+      font-size: 1rem;
+      opacity: 0.85;
+    }
+
+    /* ─── メインコンテンツ ─── */
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 12px;
+    }
+
+    /* ─── 価格表 ─── */
+    .price-table {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+    .price-table .pt-header {
+      background: #0f3460;
+      color: #fff;
+      padding: 16px 20px;
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+    .price-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 20px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .price-row:last-child { border-bottom: none; }
+    .price-row .label { font-size: 0.95rem; color: #333; }
+    .price-row .price {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #0f3460;
+    }
+    .price-row .unit {
+      font-size: 0.75rem;
+      color: #888;
+      margin-left: 4px;
+    }
+
+    /* ─── カード共通 ─── */
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .card h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card h2 .icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+    }
+
+    /* ─── 銀行振込 ─── */
+    .bank-card h2 .icon { background: #e8f5e9; }
+    .bank-info {
+      background: #f8fffe;
+      border: 1px solid #c8e6c9;
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    .bank-info dl {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 16px;
+    }
+    .bank-info dt {
+      font-size: 0.82rem;
+      color: #666;
+      white-space: nowrap;
+      padding-top: 2px;
+    }
+    .bank-info dd {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #1a1a2e;
+    }
+    .bank-note {
+      font-size: 0.8rem;
+      color: #888;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed #ddd;
+    }
+
+    /* ─── クレジットカード ─── */
+    .card-payment h2 .icon { background: #e3f2fd; }
+    .stripe-btn {
+      display: block;
+      text-decoration: none;
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-bottom: 10px;
+      border: 2px solid transparent;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .stripe-btn:last-child { margin-bottom: 0; }
+    .stripe-btn .btn-label {
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      margin-bottom: 2px;
+    }
+    .stripe-btn .btn-price {
+      font-size: 1.15rem;
+      font-weight: 800;
+    }
+    .stripe-btn .btn-arrow {
+      position: absolute;
+      right: 18px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 1.2rem;
+      opacity: 0.6;
+    }
+    .stripe-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+
+    .btn-consul   { background: #fff8e1; border-color: #ffd54f; }
+    .btn-consul .btn-label { color: #f57f17; }
+    .btn-consul .btn-price { color: #e65100; }
+
+    .btn-online   { background: #f3e5f5; border-color: #ce93d8; }
+    .btn-online .btn-label { color: #6a1b9a; }
+    .btn-online .btn-price { color: #4a148c; }
+
+    .btn-general  { background: #e8eaf6; border-color: #9fa8da; }
+    .btn-general .btn-label { color: #283593; }
+    .btn-general .btn-price { color: #1a237e; }
+
+    .stripe-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      font-size: 0.75rem;
+      color: #aaa;
+    }
+    .stripe-badge svg { flex-shrink: 0; }
+
+    /* ─── フロー ─── */
+    .flow-card h2 .icon { background: #fce4ec; }
+    .flow-steps {
+      counter-reset: step;
+      padding-left: 0;
+      list-style: none;
+    }
+    .flow-steps li {
+      counter-increment: step;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #f5f5f5;
+    }
+    .flow-steps li:last-child { border-bottom: none; }
+    .flow-steps li::before {
+      content: counter(step);
+      width: 26px;
+      height: 26px;
+      min-width: 26px;
+      border-radius: 50%;
+      background: #0f3460;
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+    .flow-steps li span { font-size: 0.92rem; color: #333; }
+    .flow-steps li .auto-tag {
+      display: inline-block;
+      background: #e3f2fd;
+      color: #1565c0;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    /* ─── 注意書き ─── */
+    .notice {
+      background: #fff8e1;
+      border-left: 4px solid #ffc107;
+      border-radius: 4px;
+      padding: 12px 16px;
+      font-size: 0.82rem;
+      color: #5d4037;
+      margin-top: 20px;
+    }
+
+    /* ─── フッター ─── */
+    footer {
+      text-align: center;
+      font-size: 0.78rem;
+      color: #aaa;
+      padding: 24px;
+      border-top: 1px solid #eee;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ヘッダー -->
+<header>
+  <div class="logo">ikeda<span>mobile</span></div>
+  <p>SIMカードお申し込み・お支払いページ</p>
+</header>
+
+<main>
+
+  <!-- 料金表 -->
+  <p class="section-title">料金プラン（1回線あたり・税込）</p>
+  <div class="price-table">
+    <div class="pt-header">月額料金</div>
+    <div class="price-row">
+      <span class="label">コンサル生</span>
+      <span class="price">¥3,000<span class="unit">/ 回線</span></span>
+    </div>
+    <div class="price-row">
+      <span class="label">オンラインコース生</span>
+      <span class="price">¥3,300<span class="unit">/ 回線</span></span>
+    </div>
+    <div class="price-row">
+      <span class="label">一般</span>
+      <span class="price">¥3,600<span class="unit">/ 回線</span></span>
+    </div>
+  </div>
+
+  <!-- 銀行振込 -->
+  <p class="section-title">お支払い方法を選択</p>
+  <div class="card bank-card">
+    <h2>
+      <span class="icon">🏦</span>
+      銀行振込
+    </h2>
+    <div class="bank-info">
+      <dl>
+        <dt>金融機関</dt>
+        <dd>さわやか信用金庫　麻布支店</dd>
+        <dt>種別</dt>
+        <dd>普通</dd>
+        <dt>口座番号</dt>
+        <dd>1245016</dd>
+        <dt>振込金額</dt>
+        <dd>上記プランの金額 × 申込回線数</dd>
+      </dl>
+    </div>
+    <p class="bank-note">
+      ※ 振込確認後にGoogleフォームのURLをお送りします。<br>
+      ※ 振込名義は申込者のお名前でお願いします。
+    </p>
+  </div>
+
+  <!-- クレジットカード -->
+  <div class="card card-payment">
+    <h2>
+      <span class="icon">💳</span>
+      クレジットカード（Stripe）
+    </h2>
+
+    <a href="https://buy.stripe.com/28EbJ060P03sdaV2f8gjC01" target="_blank" class="stripe-btn btn-consul">
+      <div class="btn-label">コンサル生</div>
+      <div class="btn-price">¥3,000 / 回線</div>
+      <span class="btn-arrow">→</span>
+    </a>
+
+    <a href="https://buy.stripe.com/aFaaEW1Kz9E24EpcTMgjC00" target="_blank" class="stripe-btn btn-online">
+      <div class="btn-label">オンラインコース生</div>
+      <div class="btn-price">¥3,300 / 回線</div>
+      <span class="btn-arrow">→</span>
+    </a>
+
+    <a href="https://buy.stripe.com/8x2cN4cpdaI61sd5rkgjC02" target="_blank" class="stripe-btn btn-general">
+      <div class="btn-label">一般</div>
+      <div class="btn-price">¥3,600 / 回線</div>
+      <span class="btn-arrow">→</span>
+    </a>
+
+    <div class="stripe-badge">
+      <svg width="40" height="16" viewBox="0 0 60 25" fill="none">
+        <text x="0" y="18" font-size="18" font-family="Arial" font-weight="bold" fill="#635bff">stripe</text>
+      </svg>
+      SSL暗号化通信で安全に決済されます
+    </div>
+  </div>
+
+  <!-- 申し込みフロー -->
+  <div class="card flow-card">
+    <h2>
+      <span class="icon">📋</span>
+      お申し込みの流れ
+    </h2>
+    <ol class="flow-steps">
+      <li><span>上記よりお支払いを完了する</span></li>
+      <li><span>お支払い確認後、登録フォームのURLをメールでお送りします<span class="auto-tag">自動</span></span></li>
+      <li><span>フォームに必要事項をご記入いただく</span></li>
+      <li><span>SIM情報（予約番号・有効期限）をメールでご連絡<span class="auto-tag">自動</span></span></li>
+    </ol>
+  </div>
+
+  <div class="notice">
+    ⚠️ お支払い後、登録フォームへの記入が完了しないとSIMの開通手続きができません。<br>
+    メールが届かない場合は迷惑メールフォルダもご確認ください。
+  </div>
+
+</main>
+
+<footer>
+  &copy; 2025 ikedamobile. All rights reserved.
+</footer>
+
+</body>
+</html>
