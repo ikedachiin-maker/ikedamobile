@@ -63,6 +63,7 @@ if [ -z "$TUNNEL_URL" ]; then
 fi
 
 WEBHOOK_URL="${TUNNEL_URL}/webhook"
+FORM_TRIGGER_URL="${TUNNEL_URL}/form-trigger"
 echo "[起動] Tunnel URL: $WEBHOOK_URL"
 
 # ── Stripe Webhook エンドポイント URL を更新 ──────────────
@@ -85,8 +86,12 @@ EOF
 echo ""
 echo "============================================"
 echo "  ikedamobile Webhook サーバー 起動完了"
-echo "  Webhook URL : $WEBHOOK_URL"
-echo "  PID (webhook): $WEBHOOK_PID"
-echo "  PID (tunnel) : $TUNNEL_PID"
+echo "  Webhook URL      : $WEBHOOK_URL"
+echo "  フォームトリガーURL: $FORM_TRIGGER_URL"
+echo "  PID (webhook)    : $WEBHOOK_PID"
+echo "  PID (tunnel)     : $TUNNEL_PID"
 echo "  ログ: $DIR/webhook.log"
+echo ""
+echo "  ★ Google Apps Script の URL を以下に更新してください:"
+echo "     $FORM_TRIGGER_URL"
 echo "============================================"

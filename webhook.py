@@ -10,9 +10,12 @@ Stripe の支払い完了イベントを受け取り、即座にフォームURL�
 
 ■ 必要な環境変数 (.env):
   STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxx  ← Stripe ダッシュボードで取得
+  FORM_TRIGGER_SECRET=任意のランダム文字列  ← Google Apps Script と共有
 """
 
 import os
+import subprocess
+import sys
 import stripe
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -78,6 +81,62 @@ def stripe_webhook():
             return jsonify({"status": "send_failed"}), 500
 
     return jsonify({"status": "ok"}), 200
+
+
+# ─────────────────────────────────────────────
+# Googleフォーム送信トリガー
+# ─────────────────────────────────────────────
+
+MAIN_PID_FILE = os.path.join(os.path.dirname(__file__), "main.pid")
+
+
+def is_main_running() -> bool:
+    """main.py がすでに実行中かどうかを PID ファイルで確認する"""
+    if not os.path.exists(MAIN_PID_FILE):
+        return False
+    try:
+        with open(MAIN_PID_FILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)  # プロセスが存在するか確認（シグナルは送らない）
+        return True
+    except (ValueError, OSError):
+        os.remove(MAIN_PID_FILE)
+        return False
+
+
+@app.route("/form-trigger", methods=["POST"])
+def form_trigger():
+    # ── トークン検証 ──────────────────────────────────────
+    secret = os.getenv("FORM_TRIGGER_SECRET", "")
+    if secret:
+        data = request.get_json(silent=True) or {}
+        if data.get("secret") != secret:
+            print("[form-trigger] トークン検証失敗 — 不正なリクエスト")
+            return jsonify({"error": "Unauthorized"}), 401
+
+    print(f"[form-trigger] フォーム送信を受信: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # ── 二重起動防止 ──────────────────────────────────────
+    if is_main_running():
+        print("[form-trigger] main.py はすでに実行中のためスキップします")
+        return jsonify({"status": "already_running"}), 200
+
+    # ── main.py をバックグラウンドで起動 ─────────────────
+    script_dir = os.path.dirname(__file__)
+    main_script = os.path.join(script_dir, "main.py")
+
+    proc = subprocess.Popen(
+        [sys.executable, main_script],
+        cwd=script_dir,
+        stdout=open(os.path.join(script_dir, "main.log"), "a"),
+        stderr=subprocess.STDOUT,
+    )
+
+    with open(MAIN_PID_FILE, "w") as f:
+        f.write(str(proc.pid))
+
+    print(f"[form-trigger] main.py を起動しました (PID: {proc.pid})")
+    return jsonify({"status": "started", "pid": proc.pid}), 200
 
 
 if __name__ == "__main__":
