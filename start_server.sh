@@ -95,3 +95,8 @@ echo ""
 echo "  ★ Google Apps Script の URL を以下に更新してください:"
 echo "     $FORM_TRIGGER_URL"
 echo "============================================"
+
+# ── スプレッドシートにフォームトリガーURL を書き込み ──────
+echo ""
+echo "[起動] フォームトリガーURL をスプレッドシートに書き込み中..."
+"$PYTHON" "$DIR/update_trigger_url.py" "$FORM_TRIGGER_URL"
