@@ -16,6 +16,9 @@ load_dotenv()
 LIST_URL   = "https://console.jpmob.jp/sonet_cards/iot_external_index"
 LOGIN_URL  = "https://console.jpmob.jp/admin_users/sign_in"
 
+# これらの状態のカードは処理をスキップする（すでに処理済み or 解約済み）
+SKIP_STATUSES = {"MNP転出中", "解約", "解約済み"}
+
 
 # ─────────────────────────────────────────────
 # ドライバ・ログイン
@@ -96,9 +99,16 @@ def split_name(full_name: str) -> tuple[str, str]:
     return full_name, ""
 
 
-def normalize_birthday(birthday_str: str) -> str:
+def normalize_birthday(birthday_str) -> str:
     """生年月日を YYYY-MM-DD 形式に正規化する"""
-    s = (birthday_str or "").strip()
+    # 整数（例: 19670518）は文字列に変換
+    if isinstance(birthday_str, int):
+        birthday_str = str(birthday_str)
+    s = (str(birthday_str) if birthday_str else "").strip()
+    # ドット区切り（例: 1963.11.19）を対応
+    if re.match(r"^\d{4}\.\d{1,2}\.\d{1,2}$", s):
+        parts = s.split(".")
+        return f"{parts[0]}-{int(parts[1]):02d}-{int(parts[2]):02d}"
     if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
         return s
     if re.match(r"^\d{4}/\d{2}/\d{2}$", s):
@@ -129,10 +139,42 @@ def get_sex_value(record: dict) -> str:
     return os.getenv("JPMOB_DEFAULT_SEX", "male")
 
 
-def enter_user_info(driver, wait, card_id: str, record: dict) -> None:
-    """1枚のSIMカードにスプレッドシートの顧客情報を入力する"""
+def get_card_status(driver) -> str:
+    """
+    現在開いているカード詳細ページの「状態」を取得する。
+    dl/dt/dd 構造と table/th/td 構造の両方を試みる。
+    """
+    for xpath in [
+        "//dt[normalize-space()='状態']/following-sibling::dd[1]",
+        "//th[normalize-space()='状態']/following-sibling::td[1]",
+        "//td[normalize-space()='状態']/following-sibling::td[1]",
+    ]:
+        try:
+            el = driver.find_element(By.XPATH, xpath)
+            return el.text.strip()
+        except Exception:
+            continue
+    return ""
+
+
+def enter_user_info(driver, wait, card_id: str, record: dict) -> bool:
+    """
+    1枚のSIMカードにスプレッドシートの顧客情報を入力する。
+    状態が「MNP転出中」「解約」等の場合はスキップして False を返す。
+    正常に入力した場合は True を返す。
+    """
     url = f"https://console.jpmob.jp/sonet_cards/{card_id}?locale=ja"
     driver.get(url)
+    time.sleep(1)
+
+    # ── 状態チェック（MNP転出中・解約はスキップ）──────────
+    status = get_card_status(driver)
+    if status in SKIP_STATUSES:
+        print(f"[jpmob] スキップ（状態={status}）: card_id={card_id}")
+        return False
+    if status and status != "開通済み":
+        print(f"[jpmob] 想定外の状態「{status}」のためスキップ: card_id={card_id}")
+        return False
 
     # プランタブをクリック
     wait.until(EC.element_to_be_clickable(
@@ -177,7 +219,8 @@ def enter_user_info(driver, wait, card_id: str, record: dict) -> None:
     ).click()
     time.sleep(2)
 
-    print(f"[jpmob] 入力完了: {record.get('名前','')} → SIM {driver.find_elements(By.XPATH, '//label[contains(.,\"電話番号\")]/following-sibling::*') and card_id}")
+    print(f"[jpmob] 入力完了: card_id={card_id}")
+    return True
 
 
 # ─────────────────────────────────────────────
@@ -265,7 +308,8 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
             except (ValueError, TypeError):
                 num_lines = 1
 
-            for _ in range(num_lines):
+            lines_assigned = 0
+            while lines_assigned < num_lines:
                 if card_index >= len(open_cards):
                     print("[jpmob] 開通済みカードが不足しています")
                     break
@@ -273,17 +317,24 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
                 card = open_cards[card_index]
                 card_index += 1
 
-                print(f"[jpmob] 入力中: {record.get('名前','')} → SIM {card['phone']} (card_id={card['card_id']})")
-                enter_user_info(driver, wait, card["card_id"], record)
+                name = f"{record.get('姓（漢字）','')} {record.get('名（漢字）','')}".strip() \
+                       or record.get('名前', '')
+                print(f"[jpmob] 入力中: {name} → SIM {card['phone']} (card_id={card['card_id']})")
+
+                entered = enter_user_info(driver, wait, card["card_id"], record)
+                if not entered:
+                    # スキップされた場合は次のカードで再試行
+                    continue
 
                 assignments.append({
-                    "record":     record,
-                    "sim_phone":  card["phone"],
-                    "card_id":    card["card_id"],
-                    "entered_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "record":        record,
+                    "sim_phone":     card["phone"],
+                    "card_id":       card["card_id"],
+                    "entered_at":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "yoyaku_number": "",
                     "expiry_date":   "",
                 })
+                lines_assigned += 1
 
         print(f"[jpmob] 入力完了: 合計 {len(assignments)} 件")
         return assignments

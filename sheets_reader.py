@@ -11,6 +11,7 @@ load_dotenv()
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/drive.file",
 ]
 
 _worksheet_cache: gspread.Worksheet | None = None
@@ -94,3 +95,27 @@ def mark_as_processed(records: list[dict]) -> None:
             seen_rows.add(row_num)
 
     print(f"[スプレッドシート] {len(seen_rows)} 件を処理済みに更新しました")
+
+
+def append_new_record(record: dict) -> None:
+    """
+    専用フォームからの新規申し込みをスプレッドシートに追記する。
+    ヘッダー行の列順に合わせて値を並べる（存在しない列は空文字）。
+    """
+    global _worksheet_cache
+
+    creds  = get_credentials()
+    client = gspread.authorize(creds)
+
+    spreadsheet_id = os.getenv("SPREADSHEET_ID")
+    sheet_name     = os.getenv("SHEET_NAME", "Sheet1")
+
+    spreadsheet = client.open_by_key(spreadsheet_id)
+    worksheet   = spreadsheet.worksheet(sheet_name)
+    _worksheet_cache = worksheet
+
+    headers = worksheet.row_values(1)
+    row     = [str(record.get(h, "")) for h in headers]
+    worksheet.append_row(row, value_input_option="USER_ENTERED")
+
+    print(f"[スプレッドシート] 新規レコードを追記しました: {record.get('メールアドレス', '')}")

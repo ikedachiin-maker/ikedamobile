@@ -20,34 +20,32 @@ HEADERS = [
 ]
 
 
+ASSIGNMENT_SHEET_NAME = "割り当て"
+
+
 def get_or_create_assignment_sheet() -> gspread.Worksheet:
-    """割り当て管理スプレッドシートを取得または新規作成する"""
+    """既存スプレッドシート内の「割り当て」タブを取得または新規作成する"""
     creds = get_credentials()
     client = gspread.authorize(creds)
 
-    sheet_id = os.getenv("ASSIGNMENT_SPREADSHEET_ID", "")
+    spreadsheet_id = os.getenv("SPREADSHEET_ID", "")
+    if not spreadsheet_id:
+        raise ValueError("SPREADSHEET_ID が .env に設定されていません")
 
-    if sheet_id:
-        try:
-            spreadsheet = client.open_by_key(sheet_id)
-            print(f"[割り当てSheet] 既存シートを使用: {spreadsheet.title}")
-            return spreadsheet.sheet1
-        except Exception:
-            print("[割り当てSheet] 既存シートが見つからないため新規作成します")
+    spreadsheet = client.open_by_key(spreadsheet_id)
 
-    # 新規スプレッドシートを作成
-    spreadsheet = client.create("jpmob割り当て管理")
-    worksheet = spreadsheet.sheet1
-    worksheet.update_title("割り当て")
+    # 「割り当て」シートが存在するか確認
+    try:
+        worksheet = spreadsheet.worksheet(ASSIGNMENT_SHEET_NAME)
+        print(f"[割り当てSheet] 既存タブを使用: {ASSIGNMENT_SHEET_NAME}")
+        return worksheet
+    except gspread.exceptions.WorksheetNotFound:
+        pass
 
-    # ヘッダー行を書き込む
+    # タブを新規作成してヘッダーを書き込む
+    worksheet = spreadsheet.add_worksheet(title=ASSIGNMENT_SHEET_NAME, rows=1000, cols=len(HEADERS))
     worksheet.append_row(HEADERS)
-
-    print(f"[割り当てSheet] 新規スプレッドシートを作成しました")
-    print(f"[割り当てSheet] SpreadsheetID: {spreadsheet.id}")
-    print(f"[割り当てSheet] .env に以下を追加してください:")
-    print(f"  ASSIGNMENT_SPREADSHEET_ID={spreadsheet.id}")
-
+    print(f"[割り当てSheet] 新規タブ「{ASSIGNMENT_SHEET_NAME}」を作成しました")
     return worksheet
 
 

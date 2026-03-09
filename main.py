@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 from sheets_reader import read_spreadsheet_data, mark_as_processed
+from application_sheet import read_unprocessed_applications, mark_applications_processed
 from jpmob_automator import input_to_jpmob, fetch_reservations
 from gmail_sender import send_gmail
 from assignment_sheet import write_assignments, update_reservation_info
@@ -71,11 +72,21 @@ def main() -> None:
 
     # ── Step 1: スプレッドシートからデータ読み込み ──────────
     print("\n[Step 1] スプレッドシートからデータを読み込み中...")
-    records = read_spreadsheet_data()
+
+    # ① 既存の Google フォーム回答シート
+    gform_records = read_spreadsheet_data()
+
+    # ② 専用フォームの「申し込み管理」タブ
+    app_records = read_unprocessed_applications()
+
+    records = gform_records + app_records
     if not records:
-        print("データが見つかりませんでした。処理を終了します。")
+        print("処理対象のデータが見つかりませんでした。処理を終了します。")
         return
-    print(f"         {len(records)} 件のデータを読み込みました")
+    print(
+        f"         合計 {len(records)} 件を読み込みました "
+        f"（Googleフォーム: {len(gform_records)} 件 / 専用フォーム: {len(app_records)} 件）"
+    )
 
     # ── Step 2: 時間チェック → jpmob 入力 ─────────────────
     print("\n[Step 2] 時間チェック中...")
@@ -91,14 +102,23 @@ def main() -> None:
     print("\n[Step 3] 割り当て情報をスプレッドシートに記録中...")
     write_assignments(assignments)
 
-    # ── Step 3.5: 処理済みフラグを更新 ───────────────────
+    # ── Step 3.5: 処理済みフラグを更新（ソース別に振り分け）──
     print("\n[Step 3.5] 申込スプレッドシートの処理済みフラグを更新中...")
-    processed_records = list({
+    assigned_records = list({
         a["record"].get("_row_number"): a["record"]
         for a in assignments
         if a["record"].get("_row_number")
     }.values())
-    mark_as_processed(processed_records)
+
+    # Google フォーム回答シートの処理済みフラグ
+    gform_done = [r for r in assigned_records if r.get("_source") != "application_sheet"]
+    if gform_done:
+        mark_as_processed(gform_done)
+
+    # 専用フォーム「申し込み管理」タブの処理済みフラグ
+    app_done = [r for r in assigned_records if r.get("_source") == "application_sheet"]
+    if app_done:
+        mark_applications_processed(app_done)
 
     # ── Step 4: 待機 ─────────────────────────────────────
     wait_min = delay_seconds // 60
