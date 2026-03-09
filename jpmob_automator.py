@@ -19,6 +19,15 @@ LOGIN_URL  = "https://console.jpmob.jp/admin_users/sign_in"
 # これらの状態のカードは処理をスキップする（すでに処理済み or 解約済み）
 SKIP_STATUSES = {"MNP転出中", "解約", "解約済み"}
 
+# ── 開通日フィルター ─────────────────────────────────────────────
+# この日以降に開通したカードのみ処理対象とする（.env で変更可能）
+_cutoff_str = os.getenv("JPMOB_OPEN_DATE_CUTOFF", "2026-03-13")
+try:
+    OPEN_DATE_CUTOFF = datetime.strptime(_cutoff_str, "%Y-%m-%d")
+except ValueError:
+    OPEN_DATE_CUTOFF = datetime(2026, 3, 13)
+print(f"[jpmob] 開通日フィルター: {OPEN_DATE_CUTOFF.strftime('%Y年%m月%d日')} 以降のカードのみ処理")
+
 
 # ─────────────────────────────────────────────
 # ドライバ・ログイン
@@ -139,6 +148,32 @@ def get_sex_value(record: dict) -> str:
     return os.getenv("JPMOB_DEFAULT_SEX", "male")
 
 
+def get_label_value(driver, label_text: str) -> str:
+    """
+    jpmob カード詳細ページのフィールド値を取得する。
+    HTML 構造: <label><strong>ラベル</strong></label> の次の <div><p>値</p></div>
+    """
+    try:
+        xpath = (
+            f"//label[.//strong[normalize-space()='{label_text}']]"
+            f"/following-sibling::div[1]//p[1]"
+        )
+        return driver.find_element(By.XPATH, xpath).text.strip()
+    except Exception:
+        return ""
+
+
+def parse_open_date(date_str: str) -> datetime | None:
+    """
+    '2026年03月13日' 形式の文字列を datetime に変換する。
+    パースできない場合は None を返す。
+    """
+    m = re.match(r"(\d{4})年(\d{2})月(\d{2})日", date_str.strip())
+    if m:
+        return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return None
+
+
 def get_card_status(driver) -> str:
     """
     現在開いているカード詳細ページの「状態」を取得する。
@@ -174,6 +209,19 @@ def enter_user_info(driver, wait, card_id: str, record: dict) -> bool:
         return False
     if status and status != "開通済み":
         print(f"[jpmob] 想定外の状態「{status}」のためスキップ: card_id={card_id}")
+        return False
+
+    # ── 開通日チェック（OPEN_DATE_CUTOFF 以降のカードのみ処理）──
+    open_date_str = get_label_value(driver, "開通日")
+    open_date     = parse_open_date(open_date_str)
+    if open_date is None:
+        print(f"[jpmob] スキップ（開通日が取得できません）: card_id={card_id}")
+        return False
+    if open_date < OPEN_DATE_CUTOFF:
+        print(
+            f"[jpmob] スキップ（開通日={open_date_str} "
+            f"< {OPEN_DATE_CUTOFF.strftime('%Y年%m月%d日')}）: card_id={card_id}"
+        )
         return False
 
     # プランタブをクリック
@@ -286,6 +334,10 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
     if not all([username, password]):
         raise ValueError("[jpmob] .env の JPMOB_USERNAME / JPMOB_PASSWORD が未設定です")
 
+    # ── 既処理済みカードIDを取得（二重処理防止）─────────────
+    from assignment_sheet import get_processed_card_ids
+    processed_card_ids = get_processed_card_ids()
+
     driver = create_driver(headless=True)
     wait   = WebDriverWait(driver, 15)
 
@@ -293,9 +345,19 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
         login(driver, wait, username, password)
 
         # 開通済みカードを全件取得
-        open_cards = get_open_cards(driver, wait)
-        if not open_cards:
+        all_open_cards = get_open_cards(driver, wait)
+        if not all_open_cards:
             print("[jpmob] 開通済みカードが見つかりません")
+            return []
+
+        # 既処理済みカードを除外（二重処理防止）
+        open_cards = [c for c in all_open_cards if c["card_id"] not in processed_card_ids]
+        skipped_dup = len(all_open_cards) - len(open_cards)
+        if skipped_dup:
+            print(f"[jpmob] 既処理済みカードを除外: {skipped_dup} 件 → 対象 {len(open_cards)} 件")
+
+        if not open_cards:
+            print("[jpmob] 処理対象カードがありません（すべて処理済み or 開通日フィルター対象外）")
             return []
 
         card_index  = 0

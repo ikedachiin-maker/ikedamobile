@@ -73,6 +73,27 @@ def write_assignments(assignments: list[dict]) -> None:
         print(f"[割り当てSheet] {len(rows)} 件を書き込みました")
 
 
+def get_processed_card_ids() -> set[str]:
+    """
+    割り当てシートに既に記録されているカードIDのセットを返す。
+    input_to_jpmob() が二重処理を防ぐために使用する。
+    """
+    try:
+        worksheet  = get_or_create_assignment_sheet()
+        all_rows   = worksheet.get_all_values()
+        col        = HEADERS.index("カードID")
+        ids = {
+            row[col]
+            for row in all_rows[1:]   # ヘッダー行をスキップ
+            if len(row) > col and row[col]
+        }
+        print(f"[割り当てSheet] 既処理済みカードID: {len(ids)} 件")
+        return ids
+    except Exception as e:
+        print(f"[割り当てSheet] 既処理済みカードID取得エラー（空セットで続行）: {e}")
+        return set()
+
+
 def update_reservation_info(assignments: list[dict]) -> None:
     """予約番号・有効期限をスプレッドシートに更新する"""
     worksheet = get_or_create_assignment_sheet()
