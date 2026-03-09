@@ -26,7 +26,7 @@ ikedamobile の SIM カード申し込み処理を自動化するツール。
 6. python main.py を実行（自動）
 ```
 
-**Mac mini で常時起動 → cron で定期実行が推奨。**
+**Macを起動するだけで全自動で動作する。**（launchd による自動起動）
 
 ---
 
@@ -49,6 +49,46 @@ jpmob-automation/
 
 lp/
 └── index.html           # 申し込みLP（ブラウザで開くだけで使える）
+```
+
+---
+
+## 起動方法（Mac を起動するだけで動く）
+
+このシステムは **Macを起動するだけで自動で動作する**。手動操作は一切不要。
+
+### 自動で行われること
+
+| タイミング | 動作 |
+|---|---|
+| Mac起動時 | launchd が `start_server.sh` を自動実行 |
+| 起動後30秒以内 | webhook サーバー（Flask）が起動 |
+| 起動後30秒以内 | Cloudflare Tunnel が起動し外部からアクセス可能になる |
+| 起動後30秒以内 | 新しいトンネルURLをスプレッドシートの `config` シートに自動書き込み |
+| フォーム送信時 | Google Apps Script がスプレッドシートから最新URLを取得 → `main.py` を自動起動 |
+| 毎日9:00 | cron で `reminder.py` が起動（フォーム未記入者にリマインダー送信） |
+
+### 動作確認方法
+
+Mac再起動後、以下のログを確認する：
+
+```bash
+tail -f ~/ikedamobile/jpmob-automation/launchd.log
+```
+
+以下のような出力が出ていれば正常：
+
+```
+[起動] webhook サーバー起動完了 (PID: xxxxx)
+[起動] Cloudflare Tunnel を起動中...
+ikedamobile Webhook サーバー 起動完了
+[config] フォームトリガーURL をスプレッドシートに書き込みました: https://xxxx.trycloudflare.com/form-trigger
+```
+
+### 手動で再起動したい場合
+
+```bash
+bash ~/ikedamobile/jpmob-automation/start_server.sh
 ```
 
 ---
