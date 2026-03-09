@@ -243,7 +243,7 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
     if not all([username, password]):
         raise ValueError("[jpmob] .env の JPMOB_USERNAME / JPMOB_PASSWORD が未設定です")
 
-    driver = create_driver(headless=False)
+    driver = create_driver(headless=True)
     wait   = WebDriverWait(driver, 15)
 
     try:
@@ -303,7 +303,7 @@ def fetch_reservations(assignments: list[dict]) -> list[dict]:
     username = os.getenv("JPMOB_USERNAME")
     password = os.getenv("JPMOB_PASSWORD")
 
-    driver = create_driver(headless=False)
+    driver = create_driver(headless=True)
     wait   = WebDriverWait(driver, 15)
 
     try:
