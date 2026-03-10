@@ -1,32 +1,33 @@
 # jpmob-automation
 
 ikedamobile の SIM カード申し込み処理を自動化するツール。
+専用申し込みフォーム（Stripe決済付き）からの申し込みを受け付け、jpmob への顧客情報入力・予約番号取得・メール送信を全自動で行う。
 
 ---
 
 ## 全体ワークフロー
 
 ```
-【Stripe決済の場合】
-1. お客様にStripe決済リンクを送る（またはLPを案内）
-2. お客様が決済（メールアドレス自動収集）
-3. python reminder.py を実行
-   → 支払い済みのお客様にGoogleフォームURLをメール送信（自動）
-   → 24時間後・48時間後にフォーム未記入ならリマインダー送信（自動）
-4. お客様がGoogleフォームに記入
-5. python main.py を実行
-   → jpmobに顧客情報を自動入力 → 予約番号取得 → メール送信（自動）
+【専用フォーム（Stripe決済）の場合】
+1. お客様が LP（lp/index.html）からプランを選択
+2. 専用申し込みフォーム（lp/form.html）に個人情報・本人確認書類をアップロード
+3. Stripe でカード決済
+4. 申し込み情報がスプレッドシート「申し込み管理」タブに自動記録
+5. main.py が自動起動
+   → jpmob の開通済みSIMに顧客情報を入力（開通日フィルター・二重処理防止あり）
+   → 約1時間後に予約番号を取得
+   → お客様にメールで予約番号を送信
 
 【銀行振込の場合】
 1. お客様に振込先情報を送る（LPまたは直接連絡）
 2. お客様が振り込む
 3. 入金確認（手動）
-4. お客様にGoogleフォームURLを手動でメール送信
-5. お客様がGoogleフォームに記入
-6. python main.py を実行（自動）
+4. お客様に Google フォーム URL を手動でメール送信
+5. お客様が Google フォームに記入
+6. main.py が自動起動（上記 5 と同様）
 ```
 
-**Macを起動するだけで全自動で動作する。**（launchd による自動起動）
+> **Mac を起動するだけで全自動で動作する。**（launchd による自動起動）
 
 ---
 
@@ -34,87 +35,70 @@ ikedamobile の SIM カード申し込み処理を自動化するツール。
 
 ```
 jpmob-automation/
-├── main.py              # メイン処理（jpmob入力→予約番号→メール送信）
-├── reminder.py          # フォーム記入リマインダー送信
-├── jpmob_automator.py   # Selenium による jpmob 自動入力
-├── sheets_reader.py     # Googleスプレッドシート読み込み・更新
-├── gmail_sender.py      # Gmail API でメール送信
-├── assignment_sheet.py  # 割り当て管理スプレッドシート
+├── main.py               # メイン処理（jpmob入力 → 予約番号取得 → メール送信）
+├── webhook.py            # Flask サーバー（LP配信・フォームAPI・Stripe Webhook）
+├── jpmob_automator.py    # Selenium による jpmob 自動入力（開通日フィルター付き）
+├── sheets_reader.py      # Google スプレッドシート読み込み・更新
+├── application_sheet.py  # 「申し込み管理」タブの管理（専用フォーム用）
+├── assignment_sheet.py   # 「割り当て」タブの管理（カードID・予約番号の記録）
+├── gmail_sender.py       # Gmail API でメール送信
+├── reminder.py           # フォーム記入リマインダー送信
 ├── mark_all_processed.py # 既存レコードを一括「処理済み」にするユーティリティ
-├── requirements.txt     # 依存ライブラリ
-├── .env                 # 環境変数（GitHubには上げない！）
-├── .env.example         # .env のテンプレート
-├── credentials.json     # Google OAuth認証情報（GitHubには上げない！）
-└── token.json           # Google OAuthトークン（GitHubには上げない！）
+├── check_open_cards.py   # 開通済みカード調査スクリプト（運用管理用）
+├── extract_2025_iccid.py # 特定期間のICCID抽出スクリプト（運用管理用）
+├── requirements.txt      # 依存ライブラリ
+├── .env                  # 環境変数（Git 管理外・機密情報）
+├── .env.example          # .env のテンプレート
+├── credentials.json      # Google OAuth 認証情報（Git 管理外）
+├── token.json            # Google OAuth トークン（Git 管理外・初回自動生成）
+├── uploads/              # 本人確認書類のアップロード先（Git 管理外）
+└── venv/                 # Python 仮想環境（Git 管理外）
 
 lp/
-└── index.html           # 申し込みLP（ブラウザで開くだけで使える）
+├── index.html            # 申し込み LP
+└── form.html             # 専用申し込みフォーム（Stripe Elements 統合）
 ```
 
 ---
 
-## 起動方法（Mac を起動するだけで動く）
+## 処理対象カードのルール
 
-このシステムは **Macを起動するだけで自動で動作する**。手動操作は一切不要。
+### 開通日フィルター
 
-### 自動で行われること
+`JPMOB_OPEN_DATE_CUTOFF`（デフォルト: `2026-03-13`）以降に開通したカードのみ処理する。
+それより前に開通した既存カードは**自動処理の対象外**。
 
-| タイミング | 動作 |
-|---|---|
-| Mac起動時 | launchd が `start_server.sh` を自動実行 |
-| 起動後30秒以内 | webhook サーバー（Flask）が起動 |
-| 起動後30秒以内 | Cloudflare Tunnel が起動し外部からアクセス可能になる |
-| 起動後30秒以内 | 新しいトンネルURLをスプレッドシートの `config` シートに自動書き込み |
-| フォーム送信時 | Google Apps Script がスプレッドシートから最新URLを取得 → `main.py` を自動起動 |
-| 毎日9:00 | cron で `reminder.py` が起動（フォーム未記入者にリマインダー送信） |
+### スキップ条件（以下のいずれかに該当するカードは処理しない）
 
-### 動作確認方法
-
-Mac再起動後、以下のログを確認する：
-
-```bash
-tail -f ~/ikedamobile/jpmob-automation/launchd.log
-```
-
-以下のような出力が出ていれば正常：
-
-```
-[起動] webhook サーバー起動完了 (PID: xxxxx)
-[起動] Cloudflare Tunnel を起動中...
-ikedamobile Webhook サーバー 起動完了
-[config] フォームトリガーURL をスプレッドシートに書き込みました: https://xxxx.trycloudflare.com/form-trigger
-```
-
-### 手動で再起動したい場合
-
-```bash
-bash ~/ikedamobile/jpmob-automation/start_server.sh
-```
+| 条件 | 理由 |
+|------|------|
+| 状態が「MNP転出中」「解約」「解約済み」 | すでに処理済みまたは解約された回線 |
+| 開通日が `JPMOB_OPEN_DATE_CUTOFF` より前 | 自動処理対象外の既存カード |
+| 「割り当て」タブに既登録の card_id | 二重処理防止 |
 
 ---
 
-## Mac mini セットアップ手順
+## セットアップ手順（初回）
 
-### 1. Python インストール確認
+### 1. Python・Chrome の確認
 
 ```bash
-python3 --version   # 3.10以上であること
+python3 --version   # 3.10 以上であること
+# Chrome がインストールされていること（ChromeDriver は自動インストール）
 ```
 
-入っていない場合は https://www.python.org からインストール。
-
-### 2. このリポジトリをクローン
+### 2. リポジトリをクローン
 
 ```bash
-git clone https://github.com/[あなたのユーザー名]/jpmob-automation.git
-cd jpmob-automation
+git clone https://github.com/ikedachiin-maker/ikedamobile.git
+cd ikedamobile/jpmob-automation
 ```
 
 ### 3. 仮想環境を作成・有効化
 
 ```bash
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate   # Windows: venv\Scripts\activate
 ```
 
 ### 4. ライブラリをインストール
@@ -125,92 +109,190 @@ pip install -r requirements.txt
 
 ### 5. .env ファイルを作成
 
-`.env.example` を参考に `.env` を作成する（GitHubには上がっていないので手動で作る）。
-
 ```bash
 cp .env.example .env
 ```
 
-以下の項目を埋める：
+`.env` を開いて以下の項目を設定する：
 
 ```env
+# jpmob ログイン
 JPMOB_USERNAME=ikedachiin@gmail.com
-JPMOB_PASSWORD=（jpmobのパスワード）
+JPMOB_PASSWORD=（jpmob のパスワード）
 
+# Google スプレッドシート
 SPREADSHEET_ID=1hrzI53VjeL5JW4O-LkofHj9GcukkhJf9SPyhkQ85GL0
 SHEET_NAME=フォームの回答 1
-ASSIGNMENT_SPREADSHEET_ID=（初回実行時に自動生成される）
 
+# Gmail 送信
 GMAIL_SENDER=ikedachiin@gmail.com
 GMAIL_SUBJECT=【ikedamobile】SIM情報のご連絡
 GMAIL_EMAIL_COLUMN=メールアドレス
 
-SEND_DELAY_SECONDS=3600
+# Stripe
+STRIPE_SECRET_KEY=sk_live_xxxxxxxxxxxxxxxx
+STRIPE_PUBLISHABLE_KEY=pk_live_xxxxxxxxxxxxxxxx
+STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxx
+
+# 動作設定
+SEND_DELAY_SECONDS=3600           # jpmob 入力後の待機時間（秒）
+JPMOB_OPEN_DATE_CUTOFF=2026-03-13 # この日以降に開通したカードのみ処理
 JPMOB_DEFAULT_SEX=male
 STATUS_COLUMN=予約番号案内
 
-STRIPE_SECRET_KEY=（StripeダッシュボードのAPIシークレットキー）
-GOOGLE_FORM_URL=（GoogleフォームのURL）
+# Webhook サーバー
+WEBHOOK_PORT=5000
+FORM_TRIGGER_SECRET=（任意のランダム文字列）
+
+# リマインダー
+GOOGLE_FORM_URL=https://forms.gle/xxxxxxxx
 REMINDER_HOURS_1=24
 REMINDER_HOURS_2=48
 ```
 
 ### 6. Google 認証ファイルを配置
 
-以下の2ファイルは機密情報のためGitHubに含まれていない。
-**元のPCから Mac mini にコピーして配置する。**
+以下の2ファイルは機密情報のため Git に含まれていない。
 
-- `credentials.json` → Google Cloud Console からダウンロードしたOAuthクライアントID
-- `token.json` → 初回 `python main.py` 実行時にブラウザ認証して自動生成される
-
-**コピー方法（元PCで実行）：**
-```
-場所: C:\Users\ysfm0664\OneDrive\Desktop\ikedamobile\jpmob-automation\credentials.json
-```
-USBやAirDropで Mac mini の `jpmob-automation/` フォルダに配置。
-
-### 7. Chrome / ChromeDriver 確認
-
-Selenium が Chrome を使うので Chrome がインストールされていること。
-ChromeDriver は `webdriver-manager` が自動でインストールするので手動対応不要。
-
-### 8. 動作テスト
+| ファイル | 取得方法 |
+|---------|---------|
+| `credentials.json` | Google Cloud Console > 認証情報 > OAuth 2.0 クライアントID をダウンロード |
+| `token.json` | 初回 `python main.py` 実行時にブラウザ認証で自動生成 |
 
 ```bash
-cd jpmob-automation
-source venv/bin/activate
-python main.py
+# 別PCからコピーする場合（AirDrop または USB）
+# 配置先: ~/ikedamobile/jpmob-automation/credentials.json
+```
+
+### 7. launchd 自動起動の設定（Mac）
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.ikedamobile.webhook.plist
+```
+
+停止する場合：
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.ikedamobile.webhook.plist
+```
+
+### 8. 動作確認
+
+```bash
+# サーバーが起動しているか確認
+curl http://localhost:5000/
+
+# ログを確認
+tail -f ~/ikedamobile/jpmob-automation/main.log
+tail -f ~/ikedamobile/jpmob-automation/webhook.log
 ```
 
 ---
 
-## Mac mini で cron 定期実行（推奨）
-
-### cron を設定する
+## cron 定期実行設定
 
 ```bash
 crontab -e
 ```
 
-以下を追記（毎日9時にリマインダー、毎日10時にメイン処理を実行する例）：
+以下を追記：
 
 ```cron
 # 毎日 9:00 にリマインダーチェック（フォーム未記入者へのメール）
-0 9 * * * /Users/[ユーザー名]/jpmob-automation/venv/bin/python /Users/[ユーザー名]/jpmob-automation/reminder.py >> /Users/[ユーザー名]/jpmob-automation/reminder.log 2>&1
+0 9 * * * /Users/ikedayoshi/ikedamobile/jpmob-automation/venv/bin/python /Users/ikedayoshi/ikedamobile/jpmob-automation/reminder.py >> /Users/ikedayoshi/ikedamobile/jpmob-automation/reminder.log 2>&1
 
 # 毎日 10:00 に jpmob 自動入力・メール送信
-0 10 * * * /Users/[ユーザー名]/jpmob-automation/venv/bin/python /Users/[ユーザー名]/jpmob-automation/main.py >> /Users/[ユーザー名]/jpmob-automation/main.log 2>&1
+0 10 * * * /Users/ikedayoshi/ikedamobile/jpmob-automation/venv/bin/python /Users/ikedayoshi/ikedamobile/jpmob-automation/main.py >> /Users/ikedayoshi/ikedamobile/jpmob-automation/main.log 2>&1
 ```
-
-> `[ユーザー名]` は Mac mini のユーザー名に置き換える（`whoami` で確認）。
 
 ---
 
-## Stripe API キーの取得方法
+## スプレッドシート構成
+
+| タブ名 | 用途 | 書き込み元 |
+|--------|------|-----------|
+| フォームの回答 1 | Google フォーム回答（銀行振込のお客様） | Google Forms 自動 |
+| 申し込み管理 | 専用フォームからの申し込み（カード決済のお客様） | webhook.py |
+| 割り当て | jpmob カードID・予約番号・送信状況の記録 | main.py |
+
+### 「申し込み管理」タブの列
+
+| 列名 | 内容 |
+|------|------|
+| タイムスタンプ | 申し込み日時 |
+| 姓（漢字）/ 名（漢字） | 氏名 |
+| 姓（フリガナ）/ 名（フリガナ） | フリガナ |
+| 生年月日 / 性別 | 個人情報 |
+| メールアドレス | 連絡先 |
+| プラン | consul / online / general |
+| 申込回線数 | 申し込み回線数 |
+| 決済金額 | 実際の支払額（円） |
+| 決済ID | Stripe PaymentIntent ID |
+| 本人確認書類 | アップロードファイルのUUID |
+| 予約番号案内 | 空=未処理 / TRUE=処理済み |
+
+### 「割り当て」タブの列
+
+| 列名 | 内容 |
+|------|------|
+| タイムスタンプ | 処理日時 |
+| 顧客名 | 氏名（漢字） |
+| メールアドレス | 連絡先 |
+| SIM電話番号 | 割り当てたSIMの電話番号 |
+| カードID | jpmob 内部ID |
+| 入力日時 | jpmob 入力完了日時 |
+| 予約番号 | jpmob が発行した予約番号 |
+| 有効期限 | 予約番号の有効期限 |
+| メール送信済み | 未送信 / 送信済み |
+
+---
+
+## 主な操作コマンド
+
+```bash
+cd ~/ikedamobile/jpmob-automation
+source venv/bin/activate
+
+# 新規申し込みを手動処理する（jpmob入力 → 予約番号取得 → メール送信）
+python main.py
+
+# フォーム記入リマインダーを手動送信
+python reminder.py
+
+# Webhook サーバーを手動起動（通常は launchd が自動起動）
+python webhook.py
+
+# 既存の全レコードを処理済みにする（初回セットアップ時のみ）
+python mark_all_processed.py
+
+# 開通済みカード一覧と開通日を調査する（運用管理用）
+python check_open_cards.py
+
+# 特定期間の開通カードの ICCID を抽出する（運用管理用）
+python extract_2025_iccid.py
+```
+
+---
+
+## Stripe 料金設定
+
+| プラン | 単価（1回線あたり） |
+|--------|------------------|
+| consul（コンサル）| ¥3,000 |
+| online（オンライン）| ¥3,300 |
+| general（一般）| ¥3,600 |
+
+> 申し込み回線数 × 単価が決済金額となる。
+
+---
+
+## Stripe API キーの確認・取得
 
 1. [Stripe Dashboard](https://dashboard.stripe.com) にログイン
 2. 左下「開発者」→「API キー」
-3. 「シークレットキー」を `.env` の `STRIPE_SECRET_KEY=` に貼る
+3. シークレットキー → `.env` の `STRIPE_SECRET_KEY` に設定
+4. 公開可能キー → `.env` の `STRIPE_PUBLISHABLE_KEY` に設定（フォームのJS用）
+5. Webhook 署名シークレット → 「開発者」→「Webhook」→「署名シークレット」→ `.env` の `STRIPE_WEBHOOK_SECRET` に設定
 
 ---
 
@@ -218,50 +300,65 @@ crontab -e
 
 1. [Google Cloud Console](https://console.cloud.google.com) を開く
 2. プロジェクト: **jpmob-automation**（既存）
-3. APIとサービス → 認証情報 → OAuth 2.0 クライアントID をダウンロード → `credentials.json` として保存
-4. 初回 `python main.py` 実行時にブラウザが開くので Google アカウントでログイン
-5. `token.json` が自動生成される
+3. 「APIとサービス」→「認証情報」→「OAuth 2.0 クライアントID」をダウンロード
+4. `credentials.json` として `jpmob-automation/` に保存
+5. 初回 `python main.py` 実行時にブラウザが開く → Google アカウントでログイン
+6. `token.json` が自動生成される（以降は不要）
 
 ---
 
-## Google フォームの列名（現在の設定）
+## 開通日フィルターの変更方法
 
-スプレッドシートの列名は以下に対応している（jpmob の入力フォームと一致）：
+`.env` の `JPMOB_OPEN_DATE_CUTOFF` を変更するだけ：
 
-| Googleフォームの列名 | 用途 |
-|---|---|
-| 姓（漢字） | 名字（漢字） |
-| 名（漢字） | 名前（漢字） |
-| 姓（フリガナ） | 名字（カタカナ） |
-| 名（フリガナ） | 名前（カタカナ） |
-| 生年月日 | 生年月日（YYYY-MM-DD形式） |
-| 性別 | 男性 or 女性 |
-| メールアドレス | メール送信先 |
-| 申込回線数 | SIM枚数（デフォルト1） |
-| 予約番号案内 | 処理済みフラグ（TRUEで処理済み） |
-
----
-
-## よくある操作
-
-### 新規申し込みを処理する
-```bash
-python main.py
+```env
+# 例: 2026年4月1日以降に開通したカードのみ処理する場合
+JPMOB_OPEN_DATE_CUTOFF=2026-04-01
 ```
 
-### フォーム記入リマインダーを送る
-```bash
-python reminder.py
-```
+変更後は webhook サーバーを再起動：
 
-### 既存の全レコードを処理済みにする（初回セットアップ時）
 ```bash
-python mark_all_processed.py
+launchctl unload ~/Library/LaunchAgents/com.ikedamobile.webhook.plist
+launchctl load  ~/Library/LaunchAgents/com.ikedamobile.webhook.plist
 ```
 
 ---
 
-## LP（申し込みページ）
+## トラブルシューティング
 
-`lp/index.html` をブラウザで開くと申し込みページが表示される。
-GitHub Pages などで公開すればURLとして使える。
+### サーバーが起動しない
+
+```bash
+# プロセス確認
+ps aux | grep webhook.py
+
+# ログ確認
+cat ~/ikedamobile/jpmob-automation/main.log
+```
+
+### jpmob にログインできない
+
+`.env` の `JPMOB_USERNAME` / `JPMOB_PASSWORD` を確認。
+
+### Google スプレッドシートに書き込めない
+
+```bash
+# token.json を削除して再認証
+rm token.json
+python main.py  # ブラウザで再ログイン
+```
+
+### Stripe 決済が通らない
+
+`.env` の `STRIPE_SECRET_KEY` が `sk_live_` から始まる本番キーであることを確認。
+
+---
+
+## 注意事項
+
+- `.env` / `credentials.json` / `token.json` は**絶対に Git にコミットしない**
+- `uploads/` フォルダには本人確認書類が保存される（Git 管理外）
+- Selenium は Chrome を使用するため、**Chrome がインストールされていること**
+- jpmob への入力は **8:00〜20:00** の間のみ実行される（時間外は自動待機）
+- 開通日フィルター（`JPMOB_OPEN_DATE_CUTOFF`）は `2026-03-13` がデフォルト
