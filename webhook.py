@@ -1,21 +1,24 @@
 """
-Stripe Webhook サーバー
+Stripe Webhook / LP 配信 / 申し込み API サーバー
 
-Stripe の支払い完了イベントを受け取り、即座にフォームURLをメール送信する。
-
-■ 起動方法:
+■ 起動方法（ローカル開発）:
   cd jpmob-automation
   source venv/bin/activate
   python webhook.py
 
-■ 必要な環境変数 (.env):
-  STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxx  ← Stripe ダッシュボードで取得
-  FORM_TRIGGER_SECRET=任意のランダム文字列  ← Google Apps Script と共有
+■ 本番（Railway）:
+  gunicorn が Procfile 経由で自動起動
+
+■ 必要な環境変数 (.env / Railway Variables):
+  STRIPE_SECRET_KEY         Stripe シークレットキー
+  STRIPE_WEBHOOK_SECRET     Stripe Webhook 署名シークレット
+  FORM_TRIGGER_SECRET       Google Apps Script からのトリガー認証トークン
+  GOOGLE_CREDENTIALS_JSON   credentials.json の内容（Railway 用）
+  GOOGLE_TOKEN_JSON         token.json の内容（Railway 用）
+  GOOGLE_DRIVE_FOLDER_ID    本人確認書類の保存先 Drive フォルダ ID（任意）
 """
 
 import os
-import subprocess
-import sys
 import uuid
 import stripe
 from flask import Flask, request, jsonify, send_from_directory
@@ -27,19 +30,23 @@ load_dotenv()
 # Stripe API キー設定
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
-# 本人確認書類の保存先
-UPLOAD_DIR       = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-ALLOWED_DOC_EXTS = {'.jpg', '.jpeg', '.png', '.pdf'}
+# 本人確認書類のアップロード設定
+ALLOWED_DOC_EXTS = {".jpg", ".jpeg", ".png", ".pdf"}
 MAX_DOC_SIZE     = 10 * 1024 * 1024  # 10MB
 
 from reminder import send_form_link, load_reminder_log, save_reminder_log
 from application_sheet import append_application_record
+from drive_uploader import upload_file_to_drive
 
 # LP フォルダのパス（webhook.py の一つ上の lp/ フォルダ）
-LP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'lp')
+LP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lp")
 
 app = Flask(__name__)
 
+
+# ─────────────────────────────────────────────
+# Stripe Webhook
+# ─────────────────────────────────────────────
 
 @app.route("/webhook", methods=["POST"])
 def stripe_webhook():
@@ -47,12 +54,10 @@ def stripe_webhook():
     sig_header = request.headers.get("Stripe-Signature", "")
     secret     = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
-    # ── 署名検証 ──────────────────────────────────────────
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, secret)
     except stripe.SignatureVerificationError as e:
         print(f"[Webhook] 署名検証失敗（スキップして続行）: {e}")
-        # 署名検証失敗でもペイロードを直接パースして処理を続行
         import json
         try:
             event = json.loads(payload)
@@ -62,7 +67,6 @@ def stripe_webhook():
         print(f"[Webhook] リクエスト解析エラー: {e}")
         return jsonify({"error": str(e)}), 400
 
-    # ── checkout.session.completed イベント処理 ───────────
     if event["type"] == "checkout.session.completed":
         session    = event["data"]["object"]
         payment_id = session.get("id", "")
@@ -79,13 +83,11 @@ def stripe_webhook():
             print("[Webhook] メールアドレスが取得できませんでした — スキップ")
             return jsonify({"status": "skipped"}), 200
 
-        # ── 重複送信チェック ──────────────────────────────
         log = load_reminder_log()
         if log.get(payment_id, {}).get("form_sent"):
             print(f"[Webhook] フォームURL送信済みのためスキップ: {email}")
             return jsonify({"status": "already_sent"}), 200
 
-        # ── フォームURL送信 ───────────────────────────────
         if send_form_link(email, amount):
             log[payment_id] = {
                 "email":        email,
@@ -102,29 +104,13 @@ def stripe_webhook():
 
 
 # ─────────────────────────────────────────────
-# Googleフォーム送信トリガー
+# Google フォーム送信トリガー（Google Apps Script から呼ばれる）
+# main.py は Mac 上の cron（毎日 10:00）で自動実行されるため、
+# このエンドポイントは受信記録のみ行う。
 # ─────────────────────────────────────────────
-
-MAIN_PID_FILE = os.path.join(os.path.dirname(__file__), "main.pid")
-
-
-def is_main_running() -> bool:
-    """main.py がすでに実行中かどうかを PID ファイルで確認する"""
-    if not os.path.exists(MAIN_PID_FILE):
-        return False
-    try:
-        with open(MAIN_PID_FILE) as f:
-            pid = int(f.read().strip())
-        os.kill(pid, 0)  # プロセスが存在するか確認（シグナルは送らない）
-        return True
-    except (ValueError, OSError):
-        os.remove(MAIN_PID_FILE)
-        return False
-
 
 @app.route("/form-trigger", methods=["POST"])
 def form_trigger():
-    # ── トークン検証 ──────────────────────────────────────
     secret = os.getenv("FORM_TRIGGER_SECRET", "")
     if secret:
         data = request.get_json(silent=True) or {}
@@ -133,28 +119,8 @@ def form_trigger():
             return jsonify({"error": "Unauthorized"}), 401
 
     print(f"[form-trigger] フォーム送信を受信: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    # ── 二重起動防止 ──────────────────────────────────────
-    if is_main_running():
-        print("[form-trigger] main.py はすでに実行中のためスキップします")
-        return jsonify({"status": "already_running"}), 200
-
-    # ── main.py をバックグラウンドで起動 ─────────────────
-    script_dir = os.path.dirname(__file__)
-    main_script = os.path.join(script_dir, "main.py")
-
-    proc = subprocess.Popen(
-        [sys.executable, main_script],
-        cwd=script_dir,
-        stdout=open(os.path.join(script_dir, "main.log"), "a"),
-        stderr=subprocess.STDOUT,
-    )
-
-    with open(MAIN_PID_FILE, "w") as f:
-        f.write(str(proc.pid))
-
-    print(f"[form-trigger] main.py を起動しました (PID: {proc.pid})")
-    return jsonify({"status": "started", "pid": proc.pid}), 200
+    # jpmob 自動入力（main.py）は Mac 上の cron で毎日 10:00 に実行されます
+    return jsonify({"status": "received"}), 200
 
 
 # ─────────────────────────────────────────────
@@ -172,7 +138,7 @@ def apply_form():
 
 
 # ─────────────────────────────────────────────
-# 本人確認書類アップロード
+# 本人確認書類アップロード（Google Drive に保存）
 # ─────────────────────────────────────────────
 
 @app.route("/api/upload-document", methods=["POST"])
@@ -185,21 +151,18 @@ def upload_document():
     if ext not in ALLOWED_DOC_EXTS:
         return jsonify({"error": "JPG・PNG・PDFのみ対応しています"}), 400
 
-    # サイズチェック
-    file.seek(0, 2)
-    size = file.tell()
-    file.seek(0)
-    if size > MAX_DOC_SIZE:
+    file_bytes = file.read()
+    if len(file_bytes) > MAX_DOC_SIZE:
         return jsonify({"error": "ファイルサイズは10MB以内にしてください"}), 400
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    doc_id   = str(uuid.uuid4())
-    savename = f"{doc_id}{ext}"
-    filepath = os.path.join(UPLOAD_DIR, savename)
-    file.save(filepath)
-
-    print(f"[upload] 本人確認書類を保存: {savename} (元ファイル名: {file.filename})")
-    return jsonify({"document_id": doc_id, "filename": file.filename}), 200
+    try:
+        drive_filename = f"{uuid.uuid4()}{ext}"
+        file_id = upload_file_to_drive(file_bytes, drive_filename, ext)
+        print(f"[upload] Google Drive に保存: {drive_filename} → {file_id}")
+        return jsonify({"document_id": file_id, "filename": file.filename}), 200
+    except Exception as e:
+        print(f"[upload] Drive アップロードエラー: {e}")
+        return jsonify({"error": "書類のアップロードに失敗しました。もう一度お試しください。"}), 500
 
 
 # ─────────────────────────────────────────────
@@ -241,13 +204,13 @@ def create_payment_intent():
 
 
 # ─────────────────────────────────────────────
-# 申し込み完了処理（決済確認 → Sheets 書き込み → main.py 起動）
+# 申し込み完了処理（決済確認 → Sheets 書き込み）
 # ─────────────────────────────────────────────
 
 @app.route("/api/complete", methods=["POST"])
 def complete_order():
-    data               = request.get_json(silent=True) or {}
-    payment_intent_id  = data.get("payment_intent_id", "")
+    data              = request.get_json(silent=True) or {}
+    payment_intent_id = data.get("payment_intent_id", "")
 
     # ── 決済確認 ──────────────────────────────────────────
     try:
@@ -259,28 +222,28 @@ def complete_order():
         print(f"[complete] PaymentIntent 取得エラー: {e}")
         return jsonify({"error": str(e)}), 400
 
-    email = data.get("email", "")
-    plan  = data.get("plan", "general")
-    lines = int(data.get("lines", 1))
+    email  = data.get("email", "")
+    plan   = data.get("plan", "general")
+    lines  = int(data.get("lines", 1))
     amount = PLAN_PRICES.get(plan, 3600) * lines
     print(f"[complete] 申し込み受付: {email} / プラン={plan} / {lines}回線 / {amount}円")
 
     # ── 申し込み管理タブに書き込み ────────────────────────
     record = {
-        "タイムスタンプ":    datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
-        "姓（漢字）":        data.get("last_kanji", ""),
-        "名（漢字）":        data.get("first_kanji", ""),
-        "姓（フリガナ）":    data.get("last_kana", ""),
-        "名（フリガナ）":    data.get("first_kana", ""),
-        "生年月日":          data.get("birthday", ""),
-        "性別":              data.get("sex", ""),
-        "メールアドレス":    email,
-        "プラン":            plan,
-        "申込回線数":        str(lines),
-        "決済金額":          str(amount),
-        "決済ID":            payment_intent_id,
-        "本人確認書類":      data.get("document_id", ""),
-        "予約番号案内":      "",
+        "タイムスタンプ":  datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
+        "姓（漢字）":      data.get("last_kanji", ""),
+        "名（漢字）":      data.get("first_kanji", ""),
+        "姓（フリガナ）":  data.get("last_kana", ""),
+        "名（フリガナ）":  data.get("first_kana", ""),
+        "生年月日":        data.get("birthday", ""),
+        "性別":            data.get("sex", ""),
+        "メールアドレス":  email,
+        "プラン":          plan,
+        "申込回線数":      str(lines),
+        "決済金額":        str(amount),
+        "決済ID":          payment_intent_id,
+        "本人確認書類":    data.get("document_id", ""),
+        "予約番号案内":    "",
     }
 
     try:
@@ -288,26 +251,11 @@ def complete_order():
     except Exception as e:
         print(f"[complete] 申し込み管理タブ書き込みエラー（続行）: {e}")
 
-    # ── main.py をバックグラウンドで起動 ─────────────────
-    if not is_main_running():
-        script_dir  = os.path.dirname(os.path.abspath(__file__))
-        main_script = os.path.join(script_dir, "main.py")
-        proc = subprocess.Popen(
-            [sys.executable, main_script],
-            cwd=script_dir,
-            stdout=open(os.path.join(script_dir, "main.log"), "a"),
-            stderr=subprocess.STDOUT,
-        )
-        with open(MAIN_PID_FILE, "w") as f:
-            f.write(str(proc.pid))
-        print(f"[complete] main.py を起動しました (PID: {proc.pid})")
-    else:
-        print("[complete] main.py はすでに実行中のためスキップ")
-
+    # jpmob 自動入力（main.py）は Mac 上の cron で毎日 10:00 に実行されます
     return jsonify({"status": "ok"}), 200
 
 
 if __name__ == "__main__":
     port = int(os.getenv("WEBHOOK_PORT", "5000"))
     print(f"[Webhook] サーバー起動中 — ポート {port}")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)

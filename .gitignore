@@ -11,3 +11,4 @@ __pycache__/
 *.log
 stripe
 main.pid
+uploads/

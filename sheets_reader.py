@@ -1,5 +1,6 @@
 """Google スプレッドシートからデータを読み込むモジュール"""
 import os
+import tempfile
 import gspread
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -16,20 +17,65 @@ SCOPES = [
 
 _worksheet_cache: gspread.Worksheet | None = None
 
+# スクリプトの絶対パスを基準にする（Railway / Mac 両対応）
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _resolve_credential_paths() -> tuple[str, str]:
+    """
+    credentials.json / token.json のパスを解決する。
+    ローカルファイルが存在する場合はそちらを優先。
+    存在しない場合は環境変数 GOOGLE_CREDENTIALS_JSON / GOOGLE_TOKEN_JSON から
+    一時ファイルを生成して返す（Railway デプロイ対応）。
+    """
+    tmp_dir = tempfile.gettempdir()
+
+    # credentials.json
+    local_creds = os.path.join(_SCRIPT_DIR, "credentials.json")
+    if os.path.exists(local_creds):
+        creds_path = local_creds
+    else:
+        creds_path = os.path.join(tmp_dir, "credentials.json")
+        cred_env = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+        if cred_env and not os.path.exists(creds_path):
+            with open(creds_path, "w") as f:
+                f.write(cred_env)
+
+    # token.json
+    local_token = os.path.join(_SCRIPT_DIR, "token.json")
+    if os.path.exists(local_token):
+        token_path = local_token
+    else:
+        token_path = os.path.join(tmp_dir, "token.json")
+        token_env = os.getenv("GOOGLE_TOKEN_JSON", "")
+        if token_env and not os.path.exists(token_path):
+            with open(token_path, "w") as f:
+                f.write(token_env)
+
+    return creds_path, token_path
+
 
 def get_credentials():
-    """OAuth2 認証情報を取得または更新する"""
+    """OAuth2 認証情報を取得または更新する（ローカル・Railway 両対応）"""
+    creds_path, token_path = _resolve_credential_paths()
+
     creds = None
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            # Railway 環境ではブラウザが使えないため、token.json を環境変数で渡す必要がある
+            if not os.path.exists(creds_path):
+                raise RuntimeError(
+                    "credentials.json が見つかりません。"
+                    "GOOGLE_CREDENTIALS_JSON 環境変数を設定してください。"
+                )
+            flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
             creds = flow.run_local_server(port=0)
-        with open("token.json", "w") as token:
+        with open(token_path, "w") as token:
             token.write(creds.to_json())
 
     return creds
