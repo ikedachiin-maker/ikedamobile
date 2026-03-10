@@ -38,8 +38,8 @@ from reminder import send_form_link, load_reminder_log, save_reminder_log
 from application_sheet import append_application_record
 from drive_uploader import upload_file_to_drive
 
-# LP フォルダのパス（webhook.py の一つ上の lp/ フォルダ）
-LP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lp")
+# LP フォルダのパス（Railway では jpmob-automation/lp/ を使用）
+LP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lp")
 
 app = Flask(__name__)
 
