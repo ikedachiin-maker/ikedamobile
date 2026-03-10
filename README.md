@@ -5,6 +5,60 @@ ikedamobile の SIM カード申し込み処理を自動化するツール。
 
 ---
 
+## 本番環境
+
+| 項目 | 値 |
+|------|-----|
+| **サービスURL** | https://ikedamobile.com |
+| **Railwayサービス** | web-production-1398a.up.railway.app |
+| **ホスティング** | Railway（Hobby プラン $5/月） |
+| **ドメイン** | Cloudflare Registrar（ikedamobile.com） |
+| **Stripe Webhook** | https://ikedamobile.com/webhook |
+
+### アーキテクチャ
+
+```
+お客様
+  └── https://ikedamobile.com  ← Cloudflare DNS
+           │
+           ▼
+      Railway（24時間稼働）
+      ・LP・申し込みフォーム配信
+      ・Stripe Webhook 受信
+      ・スプレッドシートへの申込記録
+      ・本人確認書類を Google Drive に保存
+           │
+           │（スプレッドシートに記録）
+           ▼
+      Mac mini（cron 定期実行）
+      ・毎日 10:00 に main.py 実行
+      ・jpmob への顧客情報入力
+      ・予約番号取得 → お客様にメール送信
+```
+
+### Railway 設定
+
+- **リポジトリ**: ikedachiin-maker/ikedamobile
+- **Root Directory**: `jpmob-automation`
+- **Builder**: Nixpacks（railway.toml で設定）
+- **起動コマンド**: `gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 webhook:app`（Procfile）
+
+### Railway 環境変数の更新方法
+
+1. [Railway ダッシュボード](https://railway.app) にログイン
+2. `independent-imagination` プロジェクト → `web` サービス
+3. **Variables タブ** → **Raw Editor** で一括編集
+4. 変更後は **Deploy** ボタンで再デプロイ
+
+### Railway デプロイの注意点
+
+- `GOOGLE_CREDENTIALS_JSON` / `GOOGLE_TOKEN_JSON` は JSON ファイルの中身をそのまま環境変数に設定
+- Railway では `PORT` 環境変数が自動設定される（`WEBHOOK_PORT` は不使用）
+- ファイルアップロードは **Google Drive** に保存（`drive_uploader.py`）
+- `main.py` は Mac の cron で実行するため Railway には不要
+
+---
+
 ## 全体ワークフロー
 
 ```
@@ -46,6 +100,9 @@ jpmob-automation/
 ├── mark_all_processed.py # 既存レコードを一括「処理済み」にするユーティリティ
 ├── check_open_cards.py   # 開通済みカード調査スクリプト（運用管理用）
 ├── extract_2025_iccid.py # 特定期間のICCID抽出スクリプト（運用管理用）
+├── drive_uploader.py     # Google Drive へのファイルアップロード（Railway 本番用）
+├── Procfile              # Railway 起動コマンド（gunicorn）
+├── railway.toml          # Railway ビルド設定（Nixpacks）
 ├── requirements.txt      # 依存ライブラリ
 ├── .env                  # 環境変数（Git 管理外・機密情報）
 ├── .env.example          # .env のテンプレート

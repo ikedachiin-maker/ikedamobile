@@ -39,8 +39,8 @@ def update_trigger_url(url: str) -> None:
         sheet = spreadsheet.add_worksheet(title=CONFIG_SHEET_NAME, rows=10, cols=2)
         print(f"[config] '{CONFIG_SHEET_NAME}' シートを新規作成しました")
 
-    sheet.update([["form_trigger_url"]], LABEL_CELL)
-    sheet.update([[url]], URL_CELL)
+    sheet.update(LABEL_CELL, [["form_trigger_url"]])
+    sheet.update(URL_CELL, [[url]])
     print(f"[config] フォームトリガーURL をスプレッドシートに書き込みました: {url}")
 
 
