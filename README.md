@@ -418,7 +418,7 @@ python main.py  # ブラウザで再ログイン
 - `uploads/` フォルダには本人確認書類が保存される（Git 管理外）
 - Selenium は Chrome を使用するため、**Chrome がインストールされていること**
 - jpmob への入力は **8:00〜20:00** の間のみ実行される（時間外は自動待機）
-- 開通日フィルター（`JPMOB_OPEN_DATE_CUTOFF`）は `2026-03-13` がデフォルト
+- 開通日フィルター（`JPMOB_OPEN_DATE_CUTOFF`）は `2026-03-11` がデフォルト
 
 ---
 

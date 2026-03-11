@@ -21,11 +21,11 @@ SKIP_STATUSES = {"MNP転出中", "解約", "解約済み"}
 
 # ── 開通日フィルター ─────────────────────────────────────────────
 # この日以降に開通したカードのみ処理対象とする（.env で変更可能）
-_cutoff_str = os.getenv("JPMOB_OPEN_DATE_CUTOFF", "2026-03-13")
+_cutoff_str = os.getenv("JPMOB_OPEN_DATE_CUTOFF", "2026-03-11")
 try:
     OPEN_DATE_CUTOFF = datetime.strptime(_cutoff_str, "%Y-%m-%d")
 except ValueError:
-    OPEN_DATE_CUTOFF = datetime(2026, 3, 13)
+    OPEN_DATE_CUTOFF = datetime(2026, 3, 11)
 print(f"[jpmob] 開通日フィルター: {OPEN_DATE_CUTOFF.strftime('%Y年%m月%d日')} 以降のカードのみ処理")
 
 
