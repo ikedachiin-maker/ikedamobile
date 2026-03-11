@@ -114,6 +114,11 @@ jpmob-automation/
 lp/
 ├── index.html            # 申し込み LP
 └── form.html             # 専用申し込みフォーム（Stripe Elements 統合）
+
+docs/
+├── flow.md                   # システムフロー図
+├── index.html                # docs ページ
+└── presentation_script.md   # 完全自動システムのプレゼン台本
 ```
 
 ---
@@ -450,6 +455,7 @@ Mac がスリープ中・電源オフの場合は当日の処理が行われな�
 - **Railway Root Directory 修正**: `jpmob-automation` → `/`（空欄）に変更。これによりビルド失敗が解消され展開成功
 - **開通日フィルター変更**: `JPMOB_OPEN_DATE_CUTOFF` を `2026-03-13` → `2026-03-11` に変更（3月11日以降開通のSIMを処理対象に）
 - **今後の課題追記**: Mac スリープ時に cron が動かない問題と対策案をREADMEに記載
+- **プレゼン台本作成**: 完全自動システムの概要・すごい点をまとめた台本を追加 → [`docs/presentation_script.md`](docs/presentation_script.md)
 
 ### 次のアクション（予定）
 
