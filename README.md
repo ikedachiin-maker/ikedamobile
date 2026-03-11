@@ -39,7 +39,7 @@ ikedamobile の SIM カード申し込み処理を自動化するツール。
 ### Railway 設定
 
 - **リポジトリ**: ikedachiin-maker/ikedamobile
-- **Root Directory**: `jpmob-automation`
+- **Root Directory**: `/`（空欄・リポジトリルート）
 - **Builder**: Nixpacks（railway.toml で設定）
 - **起動コマンド**: `gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 webhook:app`（Procfile）
 
@@ -419,3 +419,23 @@ python main.py  # ブラウザで再ログイン
 - Selenium は Chrome を使用するため、**Chrome がインストールされていること**
 - jpmob への入力は **8:00〜20:00** の間のみ実行される（時間外は自動待機）
 - 開通日フィルター（`JPMOB_OPEN_DATE_CUTOFF`）は `2026-03-13` がデフォルト
+
+---
+
+## 今後の課題
+
+### Mac がスリープしていると cron が動かない問題
+
+`main.py`（jpmob 自動入力）と `reminder.py`（リマインダー送信）は Mac の cron で毎日定時実行しているため、**その時間帯に Mac が起動・稼働していないと処理がスキップされる**。
+
+Mac がスリープ中・電源オフの場合は当日の処理が行われない。
+
+#### 対策案（優先度順）
+
+| 方法 | 概要 | 難易度 |
+|------|------|--------|
+| **Mac の自動起動設定** | システム環境設定 → バッテリー → 「スケジュール」で毎日 9:50 に自動起動 | ★☆☆ |
+| **Railway Cron サービス追加** | Railway に別サービスを追加し、`main.py` をクラウドで定時実行する。ただし Selenium（Chrome）が Railway では動作しないため、jpmob 入力部分の改修が必要 | ★★★ |
+| **jpmob API 対応** | jpmob が API を提供している場合は Selenium を廃止しクラウド完結できる | ★★★ |
+
+現状は **Mac の自動起動設定** が最も低コストな対策。
