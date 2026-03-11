@@ -118,7 +118,8 @@ lp/
 docs/
 ├── flow.md                   # システムフロー図
 ├── index.html                # docs ページ
-└── presentation_script.md   # 完全自動システムのプレゼン台本
+├── presentation_script.md   # 完全自動システムのプレゼン台本
+└── skill_template.md        # 横展開用スキルテンプレート・見積もり雛形
 ```
 
 ---
@@ -456,6 +457,7 @@ Mac がスリープ中・電源オフの場合は当日の処理が行われな�
 - **開通日フィルター変更**: `JPMOB_OPEN_DATE_CUTOFF` を `2026-03-13` → `2026-03-11` に変更（3月11日以降開通のSIMを処理対象に）
 - **今後の課題追記**: Mac スリープ時に cron が動かない問題と対策案をREADMEに記載
 - **プレゼン台本作成**: 完全自動システムの概要・すごい点をまとめた台本を追加 → [`docs/presentation_script.md`](docs/presentation_script.md)
+- **横展開用スキルテンプレート作成**: 同様のシステムを構築する際の手順・相場・見積もり雛形を追加 → [`docs/skill_template.md`](docs/skill_template.md)
 
 ### 次のアクション（予定）
 
