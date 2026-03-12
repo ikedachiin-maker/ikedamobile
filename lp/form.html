@@ -227,10 +227,11 @@
         運転免許証・パスポート等の画像をアップロードしてください（JPG・PNG・HEIC・PDF、10MB以内）
       </p>
       <div class="file-area" id="file-area">
-        <input type="file" id="document" accept=".jpg,.jpeg,.png,.pdf,.heic,.heif" />
+        <input type="file" id="document" accept="image/*,.pdf" />
         <div class="file-label">タップしてファイルを選択</div>
         <div class="file-name" id="file-name"></div>
       </div>
+      <p class="error-msg" id="upload-error-msg"></p>
       <input type="hidden" id="document_id" />
     </div>
 
@@ -266,6 +267,13 @@
   const PRICES = { consul: 3000, online: 3300, general: 3600 };
   let stripe, cardElement, documentId = "";
 
+  // URLパラメータからプランを自動選択
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlPlan = urlParams.get("plan");
+  if (urlPlan && document.getElementById("plan").querySelector(`option[value="${urlPlan}"]`)) {
+    document.getElementById("plan").value = urlPlan;
+  }
+
   // 金額表示の更新
   function updateAmount() {
     const plan  = document.getElementById("plan").value;
@@ -275,6 +283,7 @@
   }
   document.getElementById("plan").addEventListener("change", updateAmount);
   document.getElementById("lines").addEventListener("change", updateAmount);
+  updateAmount(); // 初期表示（URLパラメータ反映後）
 
   // Stripe初期化
   fetch("/api/stripe-config")
@@ -288,6 +297,17 @@
       cardElement.mount("#card-element");
     });
 
+  // エラー表示（場所を指定可能）
+  function showError(msg, targetId) {
+    const el = document.getElementById(targetId || "error-msg");
+    el.textContent = msg;
+    el.style.display = "block";
+  }
+  function hideError(targetId) {
+    const el = document.getElementById(targetId || "error-msg");
+    el.style.display = "none";
+  }
+
   // ファイルアップロード
   document.getElementById("document").addEventListener("change", async function() {
     const file = this.files[0];
@@ -295,14 +315,15 @@
 
     const fileNameEl = document.getElementById("file-name");
     const fileLabelEl = document.querySelector(".file-label");
+    hideError("upload-error-msg");
 
     // サイズチェック（10MB）
     if (file.size > 10 * 1024 * 1024) {
-      showError("ファイルサイズは10MB以内にしてください");
+      showError("ファイルサイズは10MB以内にしてください（現在: " + (file.size / 1024 / 1024).toFixed(1) + "MB）", "upload-error-msg");
       return;
     }
 
-    fileNameEl.textContent = file.name;
+    fileNameEl.textContent = file.name + "（" + (file.size / 1024 / 1024).toFixed(1) + "MB）";
     fileLabelEl.textContent = "アップロード中...";
 
     const form = new FormData();
@@ -314,32 +335,25 @@
       try {
         data = await res.json();
       } catch (parseErr) {
-        showError("サーバーからの応答を解析できませんでした（ステータス: " + res.status + "）");
-        fileLabelEl.textContent = "タップしてファイルを選択";
+        showError("サーバーエラー（ステータス: " + res.status + "）。管理者にお問い合わせください。", "upload-error-msg");
+        fileLabelEl.textContent = "タップしてファイルを再選択";
         return;
       }
 
       if (data.document_id) {
         documentId = data.document_id;
         document.getElementById("document_id").value = documentId;
-        fileLabelEl.textContent = "✓ アップロード完了";
-        fileNameEl.textContent = file.name;
+        fileLabelEl.textContent = "アップロード完了";
+        fileLabelEl.style.color = "#2e7d32";
       } else {
-        showError(data.error || "アップロードに失敗しました");
-        fileLabelEl.textContent = "タップしてファイルを選択";
+        showError(data.error || "アップロードに失敗しました", "upload-error-msg");
+        fileLabelEl.textContent = "タップしてファイルを再選択";
       }
     } catch (e) {
-      showError("アップロードに失敗しました。通信エラーの可能性があります。");
-      fileLabelEl.textContent = "タップしてファイルを選択";
+      showError("通信エラーが発生しました。電波状況を確認してもう一度お試しください。", "upload-error-msg");
+      fileLabelEl.textContent = "タップしてファイルを再選択";
     }
   });
-
-  // エラー表示
-  function showError(msg) {
-    const el = document.getElementById("error-msg");
-    el.textContent = msg;
-    el.style.display = "block";
-  }
 
   // フォーム送信
   document.getElementById("apply-form").addEventListener("submit", async function(e) {

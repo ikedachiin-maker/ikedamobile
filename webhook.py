@@ -149,6 +149,50 @@ def stripe_config():
 
 
 # ─────────────────────────────────────────────
+# ヘルスチェック（Google Drive / Stripe 接続確認）
+# ─────────────────────────────────────────────
+
+@app.route("/api/health")
+def health_check():
+    results = {"status": "ok", "checks": {}}
+
+    # Stripe
+    try:
+        stripe.PaymentIntent.list(limit=1)
+        results["checks"]["stripe"] = "ok"
+    except Exception as e:
+        results["checks"]["stripe"] = f"error: {e}"
+        results["status"] = "degraded"
+
+    # Google credentials
+    try:
+        from sheets_reader import get_credentials
+        creds = get_credentials()
+        results["checks"]["google_auth"] = "ok"
+        results["checks"]["google_scopes"] = list(creds.scopes) if creds.scopes else "no scopes info"
+    except Exception as e:
+        results["checks"]["google_auth"] = f"error: {e}"
+        results["status"] = "degraded"
+
+    # Google Drive
+    try:
+        from googleapiclient.discovery import build
+        from sheets_reader import get_credentials as gc
+        service = build("drive", "v3", credentials=gc())
+        about = service.about().get(fields="user").execute()
+        results["checks"]["google_drive"] = f"ok (user: {about.get('user', {}).get('emailAddress', 'unknown')})"
+    except Exception as e:
+        results["checks"]["google_drive"] = f"error: {e}"
+        results["status"] = "degraded"
+
+    # GOOGLE_DRIVE_FOLDER_ID
+    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
+    results["checks"]["drive_folder_id"] = folder_id if folder_id else "not set (will use root)"
+
+    return jsonify(results)
+
+
+# ─────────────────────────────────────────────
 # 本人確認書類アップロード（Google Drive に保存）
 # ─────────────────────────────────────────────
 
