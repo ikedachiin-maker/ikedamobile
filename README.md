@@ -458,6 +458,7 @@ Mac がスリープ中・電源オフの場合は当日の処理が行われな�
 - **今後の課題追記**: Mac スリープ時に cron が動かない問題と対策案をREADMEに記載
 - **プレゼン台本作成**: 完全自動システムの概要・すごい点をまとめた台本を追加 → [`docs/presentation_script.md`](docs/presentation_script.md)
 - **横展開用スキルテンプレート作成**: 同様のシステムを構築する際の手順・相場・見積もり雛形を追加 → [`docs/skill_template.md`](docs/skill_template.md)
+- **汎用テンプレートリポジトリ公開**: ikedamobileのコードを汎用化したGitHubテンプレートを作成・公開 → [stripe-sheets-automation-template](https://github.com/ikedachiin-maker/stripe-sheets-automation-template)
 
 ### 次のアクション（予定）
 
