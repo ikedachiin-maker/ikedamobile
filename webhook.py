@@ -42,6 +42,12 @@ from drive_uploader import upload_file_to_drive
 LP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lp")
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB（余裕を持たせる）
+
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({"error": "ファイルサイズが大きすぎます。10MB以内にしてください。"}), 413
 
 
 # ─────────────────────────────────────────────
@@ -162,12 +168,15 @@ def upload_document():
 
     try:
         drive_filename = f"{uuid.uuid4()}{ext}"
+        print(f"[upload] アップロード開始: {file.filename} ({len(file_bytes)} bytes, ext={ext})")
         file_id = upload_file_to_drive(file_bytes, drive_filename, ext)
         print(f"[upload] Google Drive に保存: {drive_filename} → {file_id}")
         return jsonify({"document_id": file_id, "filename": file.filename}), 200
     except Exception as e:
+        import traceback
         print(f"[upload] Drive アップロードエラー: {e}")
-        return jsonify({"error": "書類のアップロードに失敗しました。もう一度お試しください。"}), 500
+        traceback.print_exc()
+        return jsonify({"error": f"書類のアップロードに失敗しました: {str(e)}"}), 500
 
 
 # ─────────────────────────────────────────────

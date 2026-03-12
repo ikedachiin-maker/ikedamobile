@@ -292,22 +292,45 @@
   document.getElementById("document").addEventListener("change", async function() {
     const file = this.files[0];
     if (!file) return;
-    document.getElementById("file-name").textContent = file.name;
+
+    const fileNameEl = document.getElementById("file-name");
+    const fileLabelEl = document.querySelector(".file-label");
+
+    // サイズチェック（10MB）
+    if (file.size > 10 * 1024 * 1024) {
+      showError("ファイルサイズは10MB以内にしてください");
+      return;
+    }
+
+    fileNameEl.textContent = file.name;
+    fileLabelEl.textContent = "アップロード中...";
 
     const form = new FormData();
     form.append("document", file);
 
     try {
-      const res  = await fetch("/api/upload-document", { method: "POST", body: form });
-      const data = await res.json();
+      const res = await fetch("/api/upload-document", { method: "POST", body: form });
+      let data;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        showError("サーバーからの応答を解析できませんでした（ステータス: " + res.status + "）");
+        fileLabelEl.textContent = "タップしてファイルを選択";
+        return;
+      }
+
       if (data.document_id) {
         documentId = data.document_id;
         document.getElementById("document_id").value = documentId;
+        fileLabelEl.textContent = "✓ アップロード完了";
+        fileNameEl.textContent = file.name;
       } else {
         showError(data.error || "アップロードに失敗しました");
+        fileLabelEl.textContent = "タップしてファイルを選択";
       }
     } catch (e) {
-      showError("アップロードに失敗しました");
+      showError("アップロードに失敗しました。通信エラーの可能性があります。");
+      fileLabelEl.textContent = "タップしてファイルを選択";
     }
   });
 
