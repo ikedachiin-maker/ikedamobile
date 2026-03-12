@@ -291,7 +291,7 @@ crontab -e
 | 申込回線数 | 申し込み回線数 |
 | 決済金額 | 実際の支払額（円） |
 | 決済ID | Stripe PaymentIntent ID |
-| 本人確認書類 | アップロードファイルのUUID |
+| 本人確認書類 | Google Drive ファイルID（`drive_uploader.py` でアップロード） |
 | 予約番号案内 | 空=未処理 / TRUE=処理済み |
 
 ### 「割り当て」タブの列
@@ -390,6 +390,22 @@ launchctl load  ~/Library/LaunchAgents/com.ikedamobile.webhook.plist
 
 ## トラブルシューティング
 
+### 接続状況を一括確認する（ヘルスチェック）
+
+ブラウザで以下にアクセスすると Stripe・Google Drive・認証状態をまとめて確認できる：
+
+```
+https://ikedamobile.com/api/health
+```
+
+| チェック項目 | 正常 | 異常時の対処 |
+|---|---|---|
+| `stripe` | `ok` | `STRIPE_SECRET_KEY` を確認 |
+| `google_auth` | `ok` | `GOOGLE_TOKEN_JSON` を再設定 |
+| `google_scopes` | `drive.file` が含まれる | `token.json` を削除して再認証 |
+| `google_drive` | `ok (user: xxx@gmail.com)` | Google Cloud Console で Drive API を有効化 |
+| `drive_folder_id` | フォルダID | `GOOGLE_DRIVE_FOLDER_ID` を Railway に設定 |
+
 ### サーバーが起動しない
 
 ```bash
@@ -459,6 +475,20 @@ Mac がスリープ中・電源オフの場合は当日の処理が行われな�
 - **プレゼン台本作成**: 完全自動システムの概要・すごい点をまとめた台本を追加 → [`docs/presentation_script.md`](docs/presentation_script.md)
 - **横展開用スキルテンプレート作成**: 同様のシステムを構築する際の手順・相場・見積もり雛形を追加 → [`docs/skill_template.md`](docs/skill_template.md)
 - **汎用テンプレートリポジトリ公開**: ikedamobileのコードを汎用化したGitHubテンプレートを作成・公開 → [stripe-sheets-automation-template](https://github.com/ikedachiin-maker/stripe-sheets-automation-template)
+
+### 2026-03-12
+
+- **本人確認書類 HEIC/HEIF 対応**: iPhoneで撮影した写真（HEIC形式）をそのままアップロード可能に（`form.html`・`webhook.py`・`drive_uploader.py` の3箇所を更新）
+- **ファイルアップロード安定化**:
+  - Flask に `MAX_CONTENT_LENGTH=16MB` を設定し 413 エラーハンドラを追加
+  - `accept` 属性を `image/*,.pdf` に変更（iOS Safari 互換性向上）
+  - アップロード欄の直下にエラーメッセージを表示するよう改善
+  - クライアント側でのサイズ事前チェック追加
+  - サーバー側エラーログにスタックトレースを出力
+- **`/api/health` 診断エンドポイント追加**: Stripe・Google認証・Google Drive・フォルダID の接続状況を一括確認できるエンドポイントを追加（`https://ikedamobile.com/api/health`）
+- **URLパラメータによるプラン自動選択**: `/apply?plan=consul` 等のURLでフォームのプランが自動選択されるよう対応
+- **Google Drive API 有効化**: Google Cloud Console でプロジェクト `826771059562` の Drive API を有効化（アップロード不具合の根本原因）
+- **`GOOGLE_DRIVE_FOLDER_ID` 設定**: Railway に本人確認書類の保存先フォルダIDを設定（`1K5bYsYkcwLnyWFkRSHQg30QCg49PNHrx`）
 
 ### 次のアクション（予定）
 
