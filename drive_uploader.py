@@ -15,6 +15,8 @@ MIME_MAP = {
     ".jpeg": "image/jpeg",
     ".png":  "image/png",
     ".pdf":  "application/pdf",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
 }
 
 

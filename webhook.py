@@ -31,7 +31,7 @@ load_dotenv()
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 
 # 本人確認書類のアップロード設定
-ALLOWED_DOC_EXTS = {".jpg", ".jpeg", ".png", ".pdf"}
+ALLOWED_DOC_EXTS = {".jpg", ".jpeg", ".png", ".pdf", ".heic", ".heif"}
 MAX_DOC_SIZE     = 10 * 1024 * 1024  # 10MB
 
 from reminder import send_form_link, load_reminder_log, save_reminder_log
@@ -154,7 +154,7 @@ def upload_document():
 
     ext = os.path.splitext(file.filename.lower())[1]
     if ext not in ALLOWED_DOC_EXTS:
-        return jsonify({"error": "JPG・PNG・PDFのみ対応しています"}), 400
+        return jsonify({"error": "JPG・PNG・HEIC・PDFのみ対応しています"}), 400
 
     file_bytes = file.read()
     if len(file_bytes) > MAX_DOC_SIZE:
