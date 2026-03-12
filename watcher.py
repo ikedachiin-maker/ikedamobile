@@ -1,0 +1,158 @@
+"""
+常駐監視スクリプト — 新規申し込みを検知して自動処理
+
+■ 動作:
+  1. 5分ごとにスプレッドシートをチェック
+  2. 未処理の申し込みがあれば main.py をサブプロセスで起動
+  3. main.py 実行中は重複起動しない（ロック機構あり）
+  4. 8:00〜20:00 の間のみ動作（jpmob の時間制限に準拠）
+
+■ 起動方法:
+  cd jpmob-automation
+  source venv/bin/activate
+  python watcher.py
+
+■ 環境変数:
+  WATCHER_INTERVAL_SECONDS  チェック間隔（デフォルト: 300 = 5分）
+"""
+
+import os
+import sys
+import time
+import subprocess
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ─── 設定 ─────────────────────────────────────────────
+INTERVAL = int(os.getenv("WATCHER_INTERVAL_SECONDS", "300"))  # 5分
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PYTHON = sys.executable  # 現在の仮想環境の Python
+MAIN_SCRIPT = os.path.join(SCRIPT_DIR, "main.py")
+LOG_FILE = os.path.join(SCRIPT_DIR, "watcher.log")
+
+# main.py の実行プロセスを追跡
+_running_process: subprocess.Popen | None = None
+
+
+def log(msg: str) -> None:
+    """タイムスタンプ付きでログ出力"""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line, flush=True)
+
+
+def is_operational_hours() -> bool:
+    """8:00〜20:00 の間か判定"""
+    return 8 <= datetime.now().hour < 20
+
+
+def is_main_running() -> bool:
+    """main.py がまだ実行中かチェック"""
+    global _running_process
+    if _running_process is None:
+        return False
+    retcode = _running_process.poll()
+    if retcode is None:
+        return True  # まだ実行中
+    # 終了済み
+    if retcode == 0:
+        log(f"[完了] main.py が正常終了しました (exit code: {retcode})")
+    else:
+        log(f"[警告] main.py が異常終了しました (exit code: {retcode})")
+    _running_process = None
+    return False
+
+
+def has_unprocessed_records() -> bool:
+    """
+    スプレッドシートに未処理レコードがあるか軽量チェック。
+    Selenium を起動せずに API のみで確認する。
+    """
+    try:
+        from sheets_reader import read_spreadsheet_data
+        from application_sheet import read_unprocessed_applications
+
+        gform = read_spreadsheet_data()
+        app = read_unprocessed_applications()
+        total = len(gform) + len(app)
+
+        if total > 0:
+            log(f"[検知] 未処理レコード {total} 件（Googleフォーム: {len(gform)} / 専用フォーム: {len(app)}）")
+        return total > 0
+
+    except Exception as e:
+        log(f"[エラー] スプレッドシート確認失敗: {e}")
+        return False
+
+
+def start_main() -> None:
+    """main.py をサブプロセスで起動"""
+    global _running_process
+
+    log("[起動] main.py を開始します...")
+
+    main_log = open(os.path.join(SCRIPT_DIR, "main.log"), "a")
+    _running_process = subprocess.Popen(
+        [PYTHON, MAIN_SCRIPT],
+        cwd=SCRIPT_DIR,
+        stdout=main_log,
+        stderr=subprocess.STDOUT,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    log(f"[起動] main.py を起動しました (PID: {_running_process.pid})")
+
+
+def run_watcher() -> None:
+    """メインループ"""
+    log("=" * 55)
+    log("  ikedamobile 常駐監視 開始")
+    log(f"  チェック間隔: {INTERVAL}秒（{INTERVAL // 60}分）")
+    log(f"  稼働時間帯: 8:00〜20:00")
+    log(f"  Python: {PYTHON}")
+    log("=" * 55)
+
+    while True:
+        try:
+            now = datetime.now()
+
+            # 時間外はスキップ
+            if not is_operational_hours():
+                # 1時間ごとにログ出力（ログが静かすぎないように）
+                if now.minute < (INTERVAL // 60):
+                    log(f"[待機] 時間外（{now.strftime('%H:%M')}）— 8:00〜20:00 に稼働します")
+                time.sleep(INTERVAL)
+                continue
+
+            # main.py が実行中ならスキップ
+            if is_main_running():
+                log("[スキップ] main.py 実行中のため次回チェックまで待機")
+                time.sleep(INTERVAL)
+                continue
+
+            # スプレッドシートをチェック
+            log(f"[チェック] スプレッドシートを確認中... ({now.strftime('%H:%M')})")
+            if has_unprocessed_records():
+                start_main()
+            else:
+                log("[結果] 未処理レコードなし")
+
+        except KeyboardInterrupt:
+            log("[停止] Ctrl+C — 監視を終了します")
+            if _running_process and _running_process.poll() is None:
+                log("[停止] 実行中の main.py を終了しています...")
+                _running_process.terminate()
+                _running_process.wait(timeout=30)
+            break
+
+        except Exception as e:
+            log(f"[エラー] 予期しないエラー: {e}")
+            import traceback
+            traceback.print_exc()
+
+        time.sleep(INTERVAL)
+
+
+if __name__ == "__main__":
+    run_watcher()

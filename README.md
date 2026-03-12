@@ -100,6 +100,7 @@ jpmob-automation/
 ├── mark_all_processed.py # 既存レコードを一括「処理済み」にするユーティリティ
 ├── check_open_cards.py   # 開通済みカード調査スクリプト（運用管理用）
 ├── extract_2025_iccid.py # 特定期間のICCID抽出スクリプト（運用管理用）
+├── watcher.py            # 常駐監視（5分ごとにスプレッドシートをチェック → main.py を自動起動）
 ├── drive_uploader.py     # Google Drive へのファイルアップロード（Railway 本番用）
 ├── Procfile              # Railway 起動コマンド（gunicorn）
 ├── railway.toml          # Railway ビルド設定（Nixpacks）
@@ -252,21 +253,52 @@ tail -f ~/ikedamobile/jpmob-automation/webhook.log
 
 ---
 
-## cron 定期実行設定
+## 常駐監視（watcher.py）
+
+**cron に代わり、常駐監視スクリプトで申し込みをリアルタイム処理する。**
+
+### 仕組み
+
+```
+watcher.py（Mac 上で常駐）
+  │
+  │  5分ごとにスプレッドシートを確認
+  ▼
+  未処理レコードあり？ → main.py をサブプロセスで起動
+                         （jpmob 入力 → 予約番号取得 → メール送信）
+```
+
+- **チェック間隔**: 5分（`WATCHER_INTERVAL_SECONDS` で変更可）
+- **稼働時間帯**: 8:00〜20:00（jpmob の時間制限に準拠）
+- **重複防止**: main.py 実行中は次の起動をブロック
+- **自動復旧**: launchd の `KeepAlive` でクラッシュ時に自動再起動
+
+### launchd で自動起動
 
 ```bash
-crontab -e
+# 監視を開始（Mac 起動時にも自動スタート）
+launchctl load ~/Library/LaunchAgents/com.ikedamobile.watcher.plist
+
+# 監視を停止
+launchctl unload ~/Library/LaunchAgents/com.ikedamobile.watcher.plist
+
+# ログ確認
+tail -f ~/Desktop/ikedamobile/jpmob-automation/watcher.log
 ```
 
-以下を追記：
+### 手動で起動する場合
 
-```cron
-# 毎日 9:00 にリマインダーチェック（フォーム未記入者へのメール）
-0 9 * * * /Users/ikedayoshi/ikedamobile/jpmob-automation/venv/bin/python /Users/ikedayoshi/ikedamobile/jpmob-automation/reminder.py >> /Users/ikedayoshi/ikedamobile/jpmob-automation/reminder.log 2>&1
-
-# 毎日 10:00 に jpmob 自動入力・メール送信
-0 10 * * * /Users/ikedayoshi/ikedamobile/jpmob-automation/venv/bin/python /Users/ikedayoshi/ikedamobile/jpmob-automation/main.py >> /Users/ikedayoshi/ikedamobile/jpmob-automation/main.log 2>&1
+```bash
+cd ~/Desktop/ikedamobile/jpmob-automation
+source venv/bin/activate
+python watcher.py
 ```
+
+### 環境変数
+
+| 変数名 | デフォルト | 説明 |
+|---|---|---|
+| `WATCHER_INTERVAL_SECONDS` | `300` | チェック間隔（秒）。300 = 5分 |
 
 ---
 
@@ -446,21 +478,19 @@ python main.py  # ブラウザで再ログイン
 
 ## 今後の課題
 
-### Mac がスリープしていると cron が動かない問題
+### Mac がスリープ / 電源オフだと処理が止まる
 
-`main.py`（jpmob 自動入力）と `reminder.py`（リマインダー送信）は Mac の cron で毎日定時実行しているため、**その時間帯に Mac が起動・稼働していないと処理がスキップされる**。
-
-Mac がスリープ中・電源オフの場合は当日の処理が行われない。
+`watcher.py`（常駐監視）は Mac 上で動作するため、Mac が起動していないと処理されない。
 
 #### 対策案（優先度順）
 
 | 方法 | 概要 | 難易度 |
 |------|------|--------|
-| **Mac の自動起動設定** | システム環境設定 → バッテリー → 「スケジュール」で毎日 9:50 に自動起動 | ★☆☆ |
+| **Mac の自動起動設定** | システム環境設定 → バッテリー → 「スケジュール」で毎日 8:00 前に自動起動 | ★☆☆ |
 | **Railway Cron サービス追加** | Railway に別サービスを追加し、`main.py` をクラウドで定時実行する。ただし Selenium（Chrome）が Railway では動作しないため、jpmob 入力部分の改修が必要 | ★★★ |
 | **jpmob API 対応** | jpmob が API を提供している場合は Selenium を廃止しクラウド完結できる | ★★★ |
 
-現状は **Mac の自動起動設定** が最も低コストな対策。
+現状は **Mac の自動起動設定 + watcher.py の launchd 常駐** の組み合わせが最も低コストな対策。
 
 ---
 
@@ -489,6 +519,7 @@ Mac がスリープ中・電源オフの場合は当日の処理が行われな�
 - **URLパラメータによるプラン自動選択**: `/apply?plan=consul` 等のURLでフォームのプランが自動選択されるよう対応
 - **Google Drive API 有効化**: Google Cloud Console でプロジェクト `826771059562` の Drive API を有効化（アップロード不具合の根本原因）
 - **`GOOGLE_DRIVE_FOLDER_ID` 設定**: Railway に本人確認書類の保存先フォルダIDを設定（`1K5bYsYkcwLnyWFkRSHQg30QCg49PNHrx`）
+- **常駐監視スクリプト `watcher.py` 追加**: cron（1日1回）から常駐監視（5分ごと）に切り替え。申し込みから最大約1時間10分で予約番号をメール送信。launchd による Mac 起動時の自動開始に対応
 
 ### 次のアクション（予定）
 
