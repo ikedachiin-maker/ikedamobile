@@ -120,23 +120,54 @@ def main() -> None:
     if app_done:
         mark_applications_processed(app_done)
 
-    # ── Step 4: 待機 ─────────────────────────────────────
+    # ── Step 4〜7: 予約番号取得 → メール送信（リトライ付き）──
+    retry_interval = int(os.getenv("RETRY_INTERVAL_SECONDS", "1800"))  # 30分
+    max_retries = int(os.getenv("MAX_RETRIES", "6"))  # 最大6回（計3時間）
+
     wait_min = delay_seconds // 60
     print(f"\n[Step 4] {wait_min} 分後に予約番号を取得します...")
     print(f"         (Ctrl+C でキャンセル可能)")
     time.sleep(delay_seconds)
 
-    # ── Step 5: 予約番号・有効期限を取得 ─────────────────
-    print("\n[Step 5] jpmob から予約番号・有効期限を取得中...")
-    assignments = fetch_reservations(assignments)
+    for attempt in range(1, max_retries + 1):
+        # ── Step 5: 予約番号・有効期限を取得 ─────────────
+        print(f"\n[Step 5] jpmob から予約番号・有効期限を取得中... (試行 {attempt}/{max_retries})")
+        assignments = fetch_reservations(assignments)
+
+        issued = [a for a in assignments if a.get("yoyaku_number")]
+        not_issued = [a for a in assignments if not a.get("yoyaku_number")]
+
+        if not not_issued:
+            print(f"         全 {len(issued)} 件の予約番号を取得しました。")
+            break
+
+        print(f"         予約番号取得: {len(issued)} 件 / 未発行: {len(not_issued)} 件")
+
+        if attempt < max_retries:
+            retry_min = retry_interval // 60
+            print(f"         {retry_min} 分後に再取得します...")
+            time.sleep(retry_interval)
+        else:
+            print(f"         ⚠️ {max_retries} 回試行しましたが未発行のSIMがあります。")
 
     # ── Step 6: 管理スプレッドシートを更新 ───────────────
     print("\n[Step 6] 管理スプレッドシートを更新中...")
     update_reservation_info(assignments)
 
-    # ── Step 7: メール送信 ────────────────────────────────
-    print("\n[Step 7] 各顧客にメールを送信中...")
-    send_gmail(assignments)
+    # ── Step 7: 予約番号が取得できたもののみメール送信 ───
+    issued = [a for a in assignments if a.get("yoyaku_number")]
+    not_issued = [a for a in assignments if not a.get("yoyaku_number")]
+
+    if issued:
+        print(f"\n[Step 7] 予約番号取得済み {len(issued)} 件にメールを送信中...")
+        send_gmail(issued)
+    else:
+        print("\n[Step 7] 予約番号が取得できたSIMがありません。メール送信をスキップします。")
+
+    if not_issued:
+        print(f"\n⚠️  未発行 {len(not_issued)} 件は後で retry_send.py で再送できます:")
+        for a in not_issued:
+            print(f"   - {a['record'].get('名前', '')} / SIM {a.get('sim_phone', '')}")
 
     print("\n" + "=" * 55)
     print("  全処理が完了しました")
