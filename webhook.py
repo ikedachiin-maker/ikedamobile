@@ -137,6 +137,11 @@ def apply_form():
     return send_from_directory(LP_DIR, "form.html")
 
 
+@app.route("/api/stripe-config")
+def stripe_config():
+    return jsonify({"publishable_key": os.getenv("STRIPE_PUBLISHABLE_KEY", "")})
+
+
 # ─────────────────────────────────────────────
 # 本人確認書類アップロード（Google Drive に保存）
 # ─────────────────────────────────────────────
