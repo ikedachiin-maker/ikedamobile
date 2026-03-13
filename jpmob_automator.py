@@ -217,11 +217,11 @@ def normalize_birthday(birthday_str) -> str:
 # ─────────────────────────────────────────────
 
 def get_sex_value(record: dict) -> str:
-    """スプレッドシートの性別（男性/女性）をjpmobの値（male/female）に変換する"""
-    sex_raw = record.get("性別", "").strip()
-    if sex_raw == "女性":
+    """スプレッドシートの性別をjpmobの値（male/female）に変換する"""
+    sex_raw = record.get("性別", "").strip().lower()
+    if sex_raw in ("女性", "female"):
         return "female"
-    if sex_raw == "男性":
+    if sex_raw in ("男性", "male"):
         return "male"
     # 未入力・不明の場合は環境変数のデフォルト値を使用
     return os.getenv("JPMOB_DEFAULT_SEX", "male")
@@ -339,12 +339,29 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
     wait.until(EC.visibility_of_element_located((By.ID, "last_name_kana")))
 
     # フォームの各列から直接取得（姓・名は別々の列）
-    last_kana  = record.get("姓（フリガナ）", "").strip()
-    first_kana = record.get("名（フリガナ）", "").strip()
+    last_kana   = record.get("姓（フリガナ）", "").strip()
+    first_kana  = record.get("名（フリガナ）", "").strip()
     last_kanji  = record.get("姓（漢字）", "").strip()
     first_kanji = record.get("名（漢字）", "").strip()
-    birthday = normalize_birthday(record.get("生年月日", ""))
-    sex = get_sex_value(record)
+    birthday    = normalize_birthday(record.get("生年月日", ""))
+    sex         = get_sex_value(record)
+
+    # ── 全6項目の必須チェック（1つでも欠けていたら登録しない）──
+    required_fields = {
+        "姓（フリガナ）": last_kana,
+        "名（フリガナ）": first_kana,
+        "姓（漢字）":     last_kanji,
+        "名（漢字）":     first_kanji,
+        "生年月日":       birthday,
+        "性別":           sex,
+    }
+    missing = [name for name, val in required_fields.items() if not val]
+    if missing:
+        print(
+            f"[jpmob] スキップ（必須項目が不足）: card_id={card_id} "
+            f"— 不足: {', '.join(missing)}"
+        )
+        return False
 
     def fill(field_id, value):
         el = driver.find_element(By.ID, field_id)
