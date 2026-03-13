@@ -52,10 +52,13 @@ def get_or_create_assignment_sheet() -> gspread.Worksheet:
 
 
 def _ensure_headers(worksheet: gspread.Worksheet) -> None:
-    """既存シートのヘッダーに不足列があれば末尾に追加する"""
+    """既存シートのヘッダーに不足列があれば列数を拡張してから追加する"""
     existing = worksheet.row_values(1)
     missing = [h for h in HEADERS if h not in existing]
     if missing:
+        needed_cols = len(existing) + len(missing)
+        if worksheet.col_count < needed_cols:
+            worksheet.resize(cols=needed_cols)
         start_col = len(existing) + 1
         for i, h in enumerate(missing):
             worksheet.update_cell(1, start_col + i, h)
