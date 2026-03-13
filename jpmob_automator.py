@@ -1,6 +1,7 @@
 """jpmob 管理コンソールへの自動入力モジュール（Selenium）"""
 import os
 import re
+import json
 import time
 from datetime import datetime
 from selenium import webdriver
@@ -27,6 +28,47 @@ try:
 except ValueError:
     OPEN_DATE_CUTOFF = datetime(2026, 3, 11)
 print(f"[jpmob] 開通日フィルター: {OPEN_DATE_CUTOFF.strftime('%Y年%m月%d日')} 以降のカードのみ処理")
+
+
+# ─────────────────────────────────────────────
+# スキップ済みカードID キャッシュ
+#   開通日が OPEN_DATE_CUTOFF より前のカードIDを記録し、
+#   次回以降 Selenium での詳細ページ読み込みを省略する。
+# ─────────────────────────────────────────────
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SKIP_CACHE_FILE = os.path.join(_SCRIPT_DIR, "skipped_cards.json")
+_skip_cache: set[str] = set()
+
+
+def _load_skip_cache() -> set[str]:
+    """スキップ済みカードIDキャッシュを読み込む"""
+    global _skip_cache
+    try:
+        with open(_SKIP_CACHE_FILE, "r") as f:
+            data = json.load(f)
+            _skip_cache = set(data.get("skipped_card_ids", []))
+    except (FileNotFoundError, json.JSONDecodeError):
+        _skip_cache = set()
+    print(f"[jpmob] スキップキャッシュ読み込み: {len(_skip_cache)} 件")
+    return _skip_cache
+
+
+def _save_skip_cache() -> None:
+    """スキップ済みカードIDキャッシュを保存する"""
+    with open(_SKIP_CACHE_FILE, "w") as f:
+        json.dump(
+            {"skipped_card_ids": sorted(_skip_cache),
+             "cutoff": OPEN_DATE_CUTOFF.strftime("%Y-%m-%d"),
+             "updated_at": datetime.now().isoformat()},
+            f, indent=2,
+        )
+    print(f"[jpmob] スキップキャッシュを保存: {len(_skip_cache)} 件")
+
+
+def _add_to_skip_cache(card_id: str) -> None:
+    """カードIDをスキップキャッシュに追加（メモリ上のみ、後でまとめて保存）"""
+    _skip_cache.add(card_id)
 
 
 # ─────────────────────────────────────────────
@@ -218,6 +260,7 @@ def enter_user_info(driver, wait, card_id: str, record: dict) -> bool:
         print(f"[jpmob] スキップ（開通日が取得できません）: card_id={card_id}")
         return False
     if open_date < OPEN_DATE_CUTOFF:
+        _add_to_skip_cache(card_id)
         print(
             f"[jpmob] スキップ（開通日={open_date_str} "
             f"< {OPEN_DATE_CUTOFF.strftime('%Y年%m月%d日')}）: card_id={card_id}"
@@ -338,6 +381,9 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
     from assignment_sheet import get_processed_card_ids
     processed_card_ids = get_processed_card_ids()
 
+    # ── スキップキャッシュ読み込み（開通日が古いカードを即スキップ）──
+    skip_cache = _load_skip_cache()
+
     driver = create_driver(headless=True)
     wait   = WebDriverWait(driver, 15)
 
@@ -350,11 +396,16 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
             print("[jpmob] 開通済みカードが見つかりません")
             return []
 
-        # 既処理済みカードを除外（二重処理防止）
-        open_cards = [c for c in all_open_cards if c["card_id"] not in processed_card_ids]
-        skipped_dup = len(all_open_cards) - len(open_cards)
-        if skipped_dup:
-            print(f"[jpmob] 既処理済みカードを除外: {skipped_dup} 件 → 対象 {len(open_cards)} 件")
+        # 既処理済みカード + スキップキャッシュ を除外
+        exclude_ids = processed_card_ids | skip_cache
+        open_cards = [c for c in all_open_cards if c["card_id"] not in exclude_ids]
+        skipped_total = len(all_open_cards) - len(open_cards)
+        if skipped_total:
+            print(
+                f"[jpmob] 除外: {skipped_total} 件"
+                f"（処理済み {len(processed_card_ids)} + キャッシュ {len(skip_cache & set(c['card_id'] for c in all_open_cards))}）"
+                f" → 対象 {len(open_cards)} 件"
+            )
 
         if not open_cards:
             print("[jpmob] 処理対象カードがありません（すべて処理済み or 開通日フィルター対象外）")
@@ -399,10 +450,16 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
                 lines_assigned += 1
 
         print(f"[jpmob] 入力完了: 合計 {len(assignments)} 件")
+
+        # スキップキャッシュを保存（次回起動時に即スキップ）
+        _save_skip_cache()
+
         return assignments
 
     except Exception as e:
         print(f"[jpmob] エラー: {e}")
+        # エラー時もキャッシュは保存（途中まで判明したスキップを無駄にしない）
+        _save_skip_cache()
         raise
     finally:
         driver.quit()

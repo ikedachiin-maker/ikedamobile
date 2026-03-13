@@ -11,4 +11,5 @@ __pycache__/
 *.log
 stripe
 main.pid
+skipped_cards.json
 uploads/
