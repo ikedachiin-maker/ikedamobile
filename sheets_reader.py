@@ -22,6 +22,17 @@ _worksheet_cache: gspread.Worksheet | None = None
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def _extract_json(raw: str) -> str:
+    """
+    環境変数から最初の有効な JSON オブジェクトだけを抽出する。
+    Railway の環境変数に余分な文字（改行・空白・重複ペースト等）が
+    含まれていても安全にパースできるようにする。
+    """
+    decoder = json.JSONDecoder()
+    obj, _ = decoder.raw_decode(raw.strip())
+    return json.dumps(obj)
+
+
 def _resolve_credential_paths() -> tuple[str, str]:
     """
     credentials.json / token.json のパスを解決する。
@@ -39,8 +50,7 @@ def _resolve_credential_paths() -> tuple[str, str]:
         creds_path = os.path.join(tmp_dir, "credentials.json")
         cred_env = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
         if cred_env:
-            # JSON をパースして再シリアライズ（余分なデータを除去）
-            cleaned = json.dumps(json.loads(cred_env))
+            cleaned = _extract_json(cred_env)
             with open(creds_path, "w") as f:
                 f.write(cleaned)
 
@@ -52,8 +62,7 @@ def _resolve_credential_paths() -> tuple[str, str]:
         token_path = os.path.join(tmp_dir, "token.json")
         token_env = os.getenv("GOOGLE_TOKEN_JSON", "").strip()
         if token_env:
-            # JSON をパースして再シリアライズ（余分なデータを除去）
-            cleaned = json.dumps(json.loads(token_env))
+            cleaned = _extract_json(token_env)
             with open(token_path, "w") as f:
                 f.write(cleaned)
 
