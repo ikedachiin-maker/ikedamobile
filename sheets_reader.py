@@ -114,7 +114,10 @@ def read_spreadsheet_data() -> list[dict]:
     worksheet = spreadsheet.worksheet(sheet_name)
     _worksheet_cache = worksheet
 
-    all_records = worksheet.get_all_records()
+    raw_records = worksheet.get_all_records()
+
+    # ヘッダーに改行・空白が含まれる場合があるため、キーを正規化する
+    all_records = [{k.strip(): v for k, v in record.items()} for record in raw_records]
 
     # 未処理のレコードのみ抽出（処理済み列が空のもの）
     unprocessed = []
