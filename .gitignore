@@ -12,4 +12,5 @@ __pycache__/
 stripe
 main.pid
 skipped_cards.json
+entered_cards.json
 uploads/

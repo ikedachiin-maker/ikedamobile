@@ -72,6 +72,43 @@ def _add_to_skip_cache(card_id: str) -> None:
 
 
 # ─────────────────────────────────────────────
+# 入力済みカードID 追跡
+#   enter_user_info 成功直後にファイルへ記録し、
+#   スプレッドシート書き込み失敗時でも次回の再試行を防止する。
+# ─────────────────────────────────────────────
+
+_ENTERED_CARDS_FILE = os.path.join(_SCRIPT_DIR, "entered_cards.json")
+_entered_cards: set[str] = set()
+
+
+def _load_entered_cards() -> set[str]:
+    """入力済みカードIDを読み込む"""
+    global _entered_cards
+    try:
+        with open(_ENTERED_CARDS_FILE, "r") as f:
+            data = json.load(f)
+            _entered_cards = set(data.get("entered_card_ids", []))
+    except (FileNotFoundError, json.JSONDecodeError):
+        _entered_cards = set()
+    print(f"[jpmob] 入力済みカード読み込み: {len(_entered_cards)} 件")
+    return _entered_cards
+
+
+def _add_to_entered_cards(card_id: str) -> None:
+    """カードIDを入力済みとして即ファイルに保存する（データ消失防止）"""
+    _entered_cards.add(card_id)
+    try:
+        with open(_ENTERED_CARDS_FILE, "w") as f:
+            json.dump(
+                {"entered_card_ids": sorted(_entered_cards),
+                 "updated_at": datetime.now().isoformat()},
+                f, indent=2,
+            )
+    except Exception as e:
+        print(f"[jpmob] 入力済みカード保存エラー: {e}")
+
+
+# ─────────────────────────────────────────────
 # ドライバ・ログイン
 # ─────────────────────────────────────────────
 
@@ -284,9 +321,16 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
     time.sleep(1)
 
     # カタカナ更新ボタン（モーダルトリガー）をクリック
-    katakana_btn = wait.until(EC.element_to_be_clickable(
-        (By.CSS_SELECTOR, "a[data-target='#update_mnp_user_info']")
-    ))
+    # ── 既に情報入力済みのカードではボタンが表示されないため、短いタイムアウト（3秒）で判定 ──
+    short_wait = WebDriverWait(driver, 3)
+    try:
+        katakana_btn = short_wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "a[data-target='#update_mnp_user_info']")
+        ))
+    except Exception:
+        print(f"[jpmob] スキップ（情報入力済み）: card_id={card_id}")
+        _add_to_entered_cards(card_id)
+        return False
     driver.execute_script("arguments[0].scrollIntoView(true);", katakana_btn)
     time.sleep(0.5)
     katakana_btn.click()
@@ -320,6 +364,8 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
     ).click()
     time.sleep(2)
 
+    # 入力済みとして即ファイルに記録（Step3失敗時の再試行防止）
+    _add_to_entered_cards(card_id)
     print(f"[jpmob] 入力完了: card_id={card_id}")
     return True
 
@@ -400,6 +446,9 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
     # ── スキップキャッシュ読み込み（開通日が古いカードを即スキップ）──
     skip_cache = _load_skip_cache()
 
+    # ── 入力済みカードID読み込み（スプレッドシート書き込み失敗時の再試行防止）──
+    entered_cards = _load_entered_cards()
+
     driver = create_driver(headless=True)
     wait   = WebDriverWait(driver, 15)
 
@@ -412,14 +461,15 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
             print("[jpmob] 開通済みカードが見つかりません")
             return []
 
-        # 既処理済みカード + スキップキャッシュ を除外
-        exclude_ids = processed_card_ids | skip_cache
+        # 既処理済みカード + スキップキャッシュ + 入力済みカード を除外
+        exclude_ids = processed_card_ids | skip_cache | entered_cards
         open_cards = [c for c in all_open_cards if c["card_id"] not in exclude_ids]
         skipped_total = len(all_open_cards) - len(open_cards)
         if skipped_total:
             print(
                 f"[jpmob] 除外: {skipped_total} 件"
-                f"（処理済み {len(processed_card_ids)} + キャッシュ {len(skip_cache & set(c['card_id'] for c in all_open_cards))}）"
+                f"（処理済み {len(processed_card_ids)} + キャッシュ {len(skip_cache & set(c['card_id'] for c in all_open_cards))}"
+                f" + 入力済み {len(entered_cards & set(c['card_id'] for c in all_open_cards))}）"
                 f" → 対象 {len(open_cards)} 件"
             )
 
