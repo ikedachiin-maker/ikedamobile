@@ -17,6 +17,8 @@ HEADERS = [
     "予約番号",
     "有効期限",
     "メール送信済み",
+    "フリガナ",
+    "性別",
 ]
 
 
@@ -49,9 +51,21 @@ def get_or_create_assignment_sheet() -> gspread.Worksheet:
     return worksheet
 
 
+def _ensure_headers(worksheet: gspread.Worksheet) -> None:
+    """既存シートのヘッダーに不足列があれば末尾に追加する"""
+    existing = worksheet.row_values(1)
+    missing = [h for h in HEADERS if h not in existing]
+    if missing:
+        start_col = len(existing) + 1
+        for i, h in enumerate(missing):
+            worksheet.update_cell(1, start_col + i, h)
+        print(f"[割り当てSheet] ヘッダー追加: {', '.join(missing)}")
+
+
 def write_assignments(assignments: list[dict]) -> None:
     """割り当て情報をスプレッドシートに書き込む"""
     worksheet = get_or_create_assignment_sheet()
+    _ensure_headers(worksheet)
 
     rows = []
     for a in assignments:
@@ -66,6 +80,8 @@ def write_assignments(assignments: list[dict]) -> None:
             "",   # 予約番号（後で更新）
             "",   # 有効期限（後で更新）
             "未送信",
+            f"{record.get('姓（フリガナ）', '')} {record.get('名（フリガナ）', '')}".strip(),
+            record.get("性別", ""),
         ])
 
     if rows:
