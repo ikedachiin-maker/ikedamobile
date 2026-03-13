@@ -1,5 +1,6 @@
 """Google スプレッドシートからデータを読み込むモジュール"""
 import os
+import json
 import tempfile
 import gspread
 from google.oauth2.credentials import Credentials
@@ -36,10 +37,12 @@ def _resolve_credential_paths() -> tuple[str, str]:
         creds_path = local_creds
     else:
         creds_path = os.path.join(tmp_dir, "credentials.json")
-        cred_env = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
-        if cred_env and not os.path.exists(creds_path):
+        cred_env = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
+        if cred_env:
+            # JSON をパースして再シリアライズ（余分なデータを除去）
+            cleaned = json.dumps(json.loads(cred_env))
             with open(creds_path, "w") as f:
-                f.write(cred_env)
+                f.write(cleaned)
 
     # token.json
     local_token = os.path.join(_SCRIPT_DIR, "token.json")
@@ -47,10 +50,12 @@ def _resolve_credential_paths() -> tuple[str, str]:
         token_path = local_token
     else:
         token_path = os.path.join(tmp_dir, "token.json")
-        token_env = os.getenv("GOOGLE_TOKEN_JSON", "")
-        if token_env and not os.path.exists(token_path):
+        token_env = os.getenv("GOOGLE_TOKEN_JSON", "").strip()
+        if token_env:
+            # JSON をパースして再シリアライズ（余分なデータを除去）
+            cleaned = json.dumps(json.loads(token_env))
             with open(token_path, "w") as f:
-                f.write(token_env)
+                f.write(cleaned)
 
     return creds_path, token_path
 
