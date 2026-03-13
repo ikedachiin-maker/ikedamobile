@@ -239,7 +239,17 @@ def enter_user_info(driver, wait, card_id: str, record: dict) -> bool:
     1枚のSIMカードにスプレッドシートの顧客情報を入力する。
     状態が「MNP転出中」「解約」等の場合はスキップして False を返す。
     正常に入力した場合は True を返す。
+    Selenium の例外が発生しても False を返し、処理全体は止めない。
     """
+    try:
+        return _enter_user_info_impl(driver, wait, card_id, record)
+    except Exception as e:
+        print(f"[jpmob] スキップ（操作エラー）: card_id={card_id} — {type(e).__name__}: {e}")
+        return False
+
+
+def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
+    """enter_user_info の実処理"""
     url = f"https://console.jpmob.jp/sonet_cards/{card_id}?locale=ja"
     driver.get(url)
     time.sleep(1)
@@ -320,43 +330,49 @@ def enter_user_info(driver, wait, card_id: str, record: dict) -> bool:
 
 def get_reservation_info(driver, wait, card_id: str) -> tuple[str, str, str]:
     """
-    jpmob から予約番号・有効期限・電話番号を取得して返す
+    jpmob から予約番号・有効期限・電話番号を取得して返す。
+    例外が発生しても空文字を返し、処理全体は止めない。
     Returns: (電話番号, 予約番号, 有効期限)
     """
-    url = f"https://console.jpmob.jp/sonet_cards/{card_id}?locale=ja"
-    driver.get(url)
-
-    # 電話番号をメイン情報から取得
-    phone = ""
     try:
-        phone = driver.find_element(By.XPATH,
-            "//label[.//strong[normalize-space()='電話番号'] or normalize-space()='電話番号']/following-sibling::*[1]"
-        ).text.strip()
-    except Exception:
-        pass
+        url = f"https://console.jpmob.jp/sonet_cards/{card_id}?locale=ja"
+        driver.get(url)
 
-    # プランタブをクリック
-    wait.until(EC.element_to_be_clickable(
-        (By.XPATH, "//a[@href='#sonet_plan' or contains(@href,'#sonet_plan')]")
-    )).click()
-    time.sleep(1)
+        # 電話番号をメイン情報から取得
+        phone = ""
+        try:
+            phone = driver.find_element(By.XPATH,
+                "//label[.//strong[normalize-space()='電話番号'] or normalize-space()='電話番号']/following-sibling::*[1]"
+            ).text.strip()
+        except Exception:
+            pass
 
-    # MNP転出テーブルから予約番号と有効期限を取得
-    yoyaku = ""
-    expiry = ""
-    try:
-        mnp_cells = driver.find_elements(By.XPATH,
-            "//h2[normalize-space()='MNP転出']/following-sibling::table[1]//td"
-        )
-        data = {}
-        for i in range(0, len(mnp_cells) - 1, 2):
-            data[mnp_cells[i].text.strip()] = mnp_cells[i + 1].text.strip()
-        yoyaku = data.get("予約番号", "")
-        expiry = data.get("有効期限", "")
+        # プランタブをクリック
+        wait.until(EC.element_to_be_clickable(
+            (By.XPATH, "//a[@href='#sonet_plan' or contains(@href,'#sonet_plan')]")
+        )).click()
+        time.sleep(1)
+
+        # MNP転出テーブルから予約番号と有効期限を取得
+        yoyaku = ""
+        expiry = ""
+        try:
+            mnp_cells = driver.find_elements(By.XPATH,
+                "//h2[normalize-space()='MNP転出']/following-sibling::table[1]//td"
+            )
+            data = {}
+            for i in range(0, len(mnp_cells) - 1, 2):
+                data[mnp_cells[i].text.strip()] = mnp_cells[i + 1].text.strip()
+            yoyaku = data.get("予約番号", "")
+            expiry = data.get("有効期限", "")
+        except Exception as e:
+            print(f"[jpmob] 予約番号取得エラー (card_id={card_id}): {e}")
+
+        return phone, yoyaku, expiry
+
     except Exception as e:
-        print(f"[jpmob] 予約番号取得エラー (card_id={card_id}): {e}")
-
-    return phone, yoyaku, expiry
+        print(f"[jpmob] カード情報取得エラー (card_id={card_id}): {type(e).__name__}: {e}")
+        return "", "", ""
 
 
 # ─────────────────────────────────────────────
