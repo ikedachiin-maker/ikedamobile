@@ -563,15 +563,19 @@ def fetch_reservations(assignments: list[dict]) -> list[dict]:
         login(driver, wait, username, password)
 
         for a in assignments:
+            # 既に予約番号取得済みならスキップ（再チェックで消えるのを防止）
+            if a.get("yoyaku_number"):
+                print(f"[jpmob] 予約番号取得済み（スキップ）: SIM {a['sim_phone']} → {a['yoyaku_number']}")
+                continue
+
             card_id = a["card_id"]
             phone, yoyaku, expiry = get_reservation_info(driver, wait, card_id)
 
             if not a.get("sim_phone") and phone:
                 a["sim_phone"] = phone
-            a["yoyaku_number"] = yoyaku
-            a["expiry_date"]   = expiry
-
             if yoyaku:
+                a["yoyaku_number"] = yoyaku
+                a["expiry_date"]   = expiry
                 print(f"[jpmob] 予約番号取得: SIM {a['sim_phone']} → {yoyaku} (有効期限: {expiry})")
             else:
                 print(f"[jpmob] 予約番号未発行: SIM {a['sim_phone']} (card_id={card_id})")
