@@ -217,14 +217,20 @@ def normalize_birthday(birthday_str) -> str:
 # ─────────────────────────────────────────────
 
 def get_sex_value(record: dict) -> str:
-    """スプレッドシートの性別をjpmobの値（male/female）に変換する"""
+    """
+    スプレッドシートの性別をjpmobの値（male/female）に変換する。
+    性別が不明・未入力の場合は空文字を返す（必須項目チェックで弾かせる）。
+    """
     sex_raw = record.get("性別", "").strip().lower()
-    if sex_raw in ("女性", "female"):
+    if sex_raw in ("女性", "female", "f"):
         return "female"
-    if sex_raw in ("男性", "male"):
+    if sex_raw in ("男性", "male", "m"):
         return "male"
-    # 未入力・不明の場合は環境変数のデフォルト値を使用
-    return os.getenv("JPMOB_DEFAULT_SEX", "male")
+    # 未入力・不明の場合は空文字を返す
+    # → 必須項目チェックでスキップされ、誤った性別で登録されるのを防ぐ
+    if sex_raw:
+        print(f"[jpmob] ⚠️ 性別の値を認識できません: '{record.get('性別', '')}' → スキップ対象")
+    return ""
 
 
 def get_label_value(driver, label_text: str) -> str:
@@ -269,6 +275,88 @@ def get_card_status(driver) -> str:
         except Exception:
             continue
     return ""
+
+
+def _verify_submission(driver, card_id: str) -> bool:
+    """
+    フォーム送信後にモーダルが閉じたか、エラーメッセージがないかを検証する。
+    成功 → True, 失敗/不明 → False
+    """
+    try:
+        modal = driver.find_element(By.ID, "update_mnp_user_info")
+        if modal.is_displayed():
+            # モーダルがまだ表示されている → エラーの可能性
+            # エラーメッセージを検索（Bootstrap の一般的なパターン）
+            error_selectors = [
+                "#update_mnp_user_info .alert-danger",
+                "#update_mnp_user_info .alert-warning",
+                "#update_mnp_user_info .error",
+                "#update_mnp_user_info .help-block",
+                "#update_mnp_user_info .invalid-feedback",
+                "#update_mnp_user_info .field_with_errors",
+            ]
+            error_texts = []
+            for sel in error_selectors:
+                try:
+                    errors = driver.find_elements(By.CSS_SELECTOR, sel)
+                    for e in errors:
+                        txt = e.text.strip()
+                        if txt:
+                            error_texts.append(txt)
+                except Exception:
+                    pass
+
+            if error_texts:
+                print(
+                    f"[jpmob] ❌ フォームエラー検出: card_id={card_id} "
+                    f"— {'; '.join(error_texts)}"
+                )
+            else:
+                # エラーメッセージなしだがモーダルが開いたまま
+                # ページ全体のアラートも確認
+                try:
+                    page_alerts = driver.find_elements(By.CSS_SELECTOR, ".alert")
+                    for a in page_alerts:
+                        txt = a.text.strip()
+                        if txt:
+                            error_texts.append(f"ページアラート: {txt}")
+                except Exception:
+                    pass
+
+                if error_texts:
+                    print(
+                        f"[jpmob] ❌ ページエラー検出: card_id={card_id} "
+                        f"— {'; '.join(error_texts)}"
+                    )
+                else:
+                    print(
+                        f"[jpmob] ⚠️ モーダルが閉じていません（原因不明）: "
+                        f"card_id={card_id}"
+                    )
+
+            # デバッグ用スクリーンショットを保存
+            _save_debug_screenshot(driver, card_id, "submit_error")
+            return False
+
+        # モーダルが閉じている → 送信成功の可能性が高い
+        return True
+
+    except Exception:
+        # モーダル要素が見つからない → 正常に閉じた（DOMから削除された）
+        return True
+
+
+def _save_debug_screenshot(driver, card_id: str, suffix: str) -> None:
+    """デバッグ用のスクリーンショットを保存する"""
+    try:
+        screenshot_dir = os.path.join(_SCRIPT_DIR, "debug_screenshots")
+        os.makedirs(screenshot_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(screenshot_dir, f"{card_id}_{suffix}_{timestamp}.png")
+        driver.save_screenshot(path)
+        print(f"[jpmob]   スクリーンショット保存: {path}")
+    except Exception as e:
+        print(f"[jpmob]   スクリーンショット保存エラー: {e}")
 
 
 def enter_user_info(driver, wait, card_id: str, record: dict) -> bool:
@@ -363,6 +451,13 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
         )
         return False
 
+    # ── デバッグ: 入力データをログ出力 ──
+    print(
+        f"[jpmob]   データ: 姓カナ={last_kana}, 名カナ={first_kana}, "
+        f"姓漢字={last_kanji}, 名漢字={first_kanji}, "
+        f"誕生日={birthday}, 性別={sex}"
+    )
+
     def fill(field_id, value):
         el = driver.find_element(By.ID, field_id)
         el.clear()
@@ -375,15 +470,32 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
     fill("birthday",        birthday)
     Select(driver.find_element(By.ID, "sex")).select_by_value(sex)
 
+    # ── デバッグ: 入力値の確認（実際にフィールドに入った値）──
+    actual_values = {}
+    for fid in ["last_name_kana", "first_name_kana", "last_name", "first_name", "birthday"]:
+        try:
+            actual_values[fid] = driver.find_element(By.ID, fid).get_attribute("value")
+        except Exception:
+            actual_values[fid] = "取得失敗"
+    print(f"[jpmob]   実際の入力値: {actual_values}")
+
     # 更新ボタンをクリック
     driver.find_element(By.CSS_SELECTOR,
         "#update_mnp_user_info input[type='submit']"
     ).click()
-    time.sleep(2)
+    time.sleep(3)  # 送信処理のため少し長く待つ
+
+    # ── 送信結果を検証 ──────────────────────────
+    submit_ok = _verify_submission(driver, card_id)
 
     # 入力済みとして即ファイルに記録（Step3失敗時の再試行防止）
     _add_to_entered_cards(card_id)
-    print(f"[jpmob] 入力完了: card_id={card_id}")
+
+    if submit_ok:
+        print(f"[jpmob] ✅ 入力完了（検証OK）: card_id={card_id}")
+    else:
+        print(f"[jpmob] ⚠️ 入力完了（検証失敗 — 送信結果が確認できません）: card_id={card_id}")
+
     return True
 
 

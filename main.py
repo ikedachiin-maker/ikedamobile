@@ -79,13 +79,45 @@ def main() -> None:
     # ② 専用フォームの「申し込み管理」タブ
     app_records = read_unprocessed_applications()
 
-    records = gform_records + app_records
+    # ── 重複チェック（メールアドレスで同一人物を検出）──────
+    # 専用フォーム（構造化データ）を優先し、Googleフォーム側の重複を除外する
+    all_records = gform_records + app_records
+    seen_emails: dict[str, dict] = {}
+    records: list[dict] = []
+    duplicates_removed = 0
+
+    # 専用フォームを先に処理（優先度が高い）
+    for rec in app_records + gform_records:
+        email = (rec.get("メールアドレス") or "").strip().lower()
+        if not email:
+            # メールアドレスがないレコードはそのまま通す
+            records.append(rec)
+            continue
+        if email in seen_emails:
+            prev = seen_emails[email]
+            prev_src = "専用フォーム" if prev.get("_source") == "application_sheet" else "Googleフォーム"
+            cur_src  = "専用フォーム" if rec.get("_source") == "application_sheet" else "Googleフォーム"
+            name = f"{rec.get('姓（漢字）', '')} {rec.get('名（漢字）', '')}".strip() \
+                   or rec.get("名前", "")
+            print(
+                f"  ⚠️ 重複検出（スキップ）: {name} <{email}> "
+                f"— {cur_src}のレコードを除外（{prev_src}を優先）"
+            )
+            duplicates_removed += 1
+            continue
+        seen_emails[email] = rec
+        records.append(rec)
+
+    if duplicates_removed:
+        print(f"  → {duplicates_removed} 件の重複を除外しました")
+
     if not records:
         print("処理対象のデータが見つかりませんでした。処理を終了します。")
         return
     print(
         f"         合計 {len(records)} 件を読み込みました "
-        f"（Googleフォーム: {len(gform_records)} 件 / 専用フォーム: {len(app_records)} 件）"
+        f"（Googleフォーム: {len(gform_records)} 件 / 専用フォーム: {len(app_records)} 件"
+        f"{f' / 重複除外: {duplicates_removed} 件' if duplicates_removed else ''}）"
     )
 
     # ── Step 2: 時間チェック → jpmob 入力 ─────────────────
