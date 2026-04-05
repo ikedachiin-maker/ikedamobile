@@ -113,6 +113,63 @@ def get_processed_card_ids() -> set[str]:
         return set()
 
 
+def get_assignments_by_phones(phones: list[str]) -> list[dict]:
+    """
+    割り当てシートから指定したSIM電話番号に一致する行を取得する。
+    Returns: [{"顧客名": ..., "メールアドレス": ..., "カードID": ..., ...}, ...]
+    """
+    worksheet = get_or_create_assignment_sheet()
+    all_rows = worksheet.get_all_values()
+    if len(all_rows) <= 1:
+        return []
+
+    phone_col = HEADERS.index("SIM電話番号")
+    phone_set = set(phones)
+    results = []
+
+    for row in all_rows[1:]:
+        row_dict = dict(zip(HEADERS, row + [""] * (len(HEADERS) - len(row))))
+        if row_dict.get("SIM電話番号", "").strip() in phone_set:
+            results.append(row_dict)
+
+    print(f"[割り当てSheet] 電話番号検索: {len(results)} 件ヒット（検索 {len(phones)} 件）")
+    return results
+
+
+def update_sim_assignment(old_phone: str, new_phone: str, new_card_id: str, new_entered_at: str) -> bool:
+    """
+    割り当てシートの既存行のSIM情報を差し替える。
+    old_phone の行を見つけて、新しいSIM電話番号・カードID・入力日時に更新し、
+    予約番号・有効期限をクリアする。
+    """
+    worksheet = get_or_create_assignment_sheet()
+    all_rows = worksheet.get_all_values()
+    if len(all_rows) <= 1:
+        return False
+
+    phone_col     = HEADERS.index("SIM電話番号") + 1      # 1-indexed
+    card_id_col   = HEADERS.index("カードID") + 1
+    entered_col   = HEADERS.index("入力日時") + 1
+    yoyaku_col    = HEADERS.index("予約番号") + 1
+    expiry_col    = HEADERS.index("有効期限") + 1
+    sent_col      = HEADERS.index("メール送信済み") + 1
+
+    for row_idx, row in enumerate(all_rows[1:], start=2):
+        row_dict = dict(zip(HEADERS, row + [""] * (len(HEADERS) - len(row))))
+        if row_dict.get("SIM電話番号", "").strip() == old_phone:
+            worksheet.update_cell(row_idx, phone_col, new_phone)
+            worksheet.update_cell(row_idx, card_id_col, new_card_id)
+            worksheet.update_cell(row_idx, entered_col, new_entered_at)
+            worksheet.update_cell(row_idx, yoyaku_col, "")
+            worksheet.update_cell(row_idx, expiry_col, "")
+            worksheet.update_cell(row_idx, sent_col, "未送信")
+            print(f"[割り当てSheet] SIM差し替え: {old_phone} → {new_phone} (card_id={new_card_id})")
+            return True
+
+    print(f"[割り当てSheet] SIM差し替え失敗: {old_phone} が見つかりません")
+    return False
+
+
 def update_reservation_info(assignments: list[dict]) -> None:
     """予約番号・有効期限をスプレッドシートに更新する"""
     worksheet = get_or_create_assignment_sheet()

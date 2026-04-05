@@ -20,6 +20,7 @@
 
 import os
 import sys
+import json
 import time
 import subprocess
 from datetime import datetime
@@ -34,11 +35,14 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PYTHON = sys.executable  # 現在の仮想環境の Python
 MAIN_SCRIPT = os.path.join(SCRIPT_DIR, "main.py")
 RETRY_SCRIPT = os.path.join(SCRIPT_DIR, "retry_send.py")
+REASSIGN_SCRIPT = os.path.join(SCRIPT_DIR, "reassign.py")
+REASSIGN_CONFIG = os.path.join(SCRIPT_DIR, "reassign_config.json")
 LOG_FILE = os.path.join(SCRIPT_DIR, "watcher.log")
 
-# main.py / retry_send.py の実行プロセスを追跡
+# main.py / retry_send.py / reassign.py の実行プロセスを追跡
 _running_process: subprocess.Popen | None = None
 _retry_process: subprocess.Popen | None = None
+_reassign_process: subprocess.Popen | None = None
 _last_retry_check: float = 0  # 最後にリトライチェックした時刻
 
 
@@ -172,8 +176,56 @@ def start_retry() -> None:
     log(f"[起動] retry_send.py を起動しました (PID: {_retry_process.pid})")
 
 
+def has_pending_reassignments() -> bool:
+    """reassign_config.json に pending タスクがあるかチェック"""
+    try:
+        with open(REASSIGN_CONFIG, "r") as f:
+            config = json.load(f)
+        pending = [t for t in config.get("tasks", []) if t.get("status") == "pending"]
+        if pending:
+            log(f"[検知] SIM再割り当てタスク {len(pending)} 件が pending です")
+        return len(pending) > 0
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False
+
+
+def is_reassign_running() -> bool:
+    """reassign.py がまだ実行中かチェック"""
+    global _reassign_process
+    if _reassign_process is None:
+        return False
+    retcode = _reassign_process.poll()
+    if retcode is None:
+        return True
+    if retcode == 0:
+        log(f"[完了] reassign.py が正常終了しました")
+    else:
+        log(f"[警告] reassign.py が異常終了しました (exit code: {retcode})")
+    _reassign_process = None
+    return False
+
+
+def start_reassign() -> None:
+    """reassign.py をサブプロセスで起動"""
+    global _reassign_process
+
+    log("[起動] reassign.py を開始します...")
+
+    reassign_log = open(os.path.join(SCRIPT_DIR, "reassign.log"), "a")
+    _reassign_process = subprocess.Popen(
+        [PYTHON, REASSIGN_SCRIPT],
+        cwd=SCRIPT_DIR,
+        stdout=reassign_log,
+        stderr=subprocess.STDOUT,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    log(f"[起動] reassign.py を起動しました (PID: {_reassign_process.pid})")
+
+
 def run_watcher() -> None:
     """メインループ"""
+    global _last_retry_check
+    _last_retry_check = 0.0  # Python 3.12+ の UnboundLocalError 対策
     log("=" * 55)
     log("  ikedamobile 常駐監視 開始")
     log(f"  チェック間隔: {INTERVAL}秒（{INTERVAL // 60}分）")
@@ -193,7 +245,7 @@ def run_watcher() -> None:
                 time.sleep(INTERVAL)
                 continue
 
-            # main.py / retry_send.py が実行中ならスキップ
+            # main.py / retry_send.py / reassign.py が実行中ならスキップ
             if is_main_running():
                 log("[スキップ] main.py 実行中のため次回チェックまで待機")
                 time.sleep(INTERVAL)
@@ -201,6 +253,11 @@ def run_watcher() -> None:
 
             if is_retry_running():
                 log("[スキップ] retry_send.py 実行中のため次回チェックまで待機")
+                time.sleep(INTERVAL)
+                continue
+
+            if is_reassign_running():
+                log("[スキップ] reassign.py 実行中のため次回チェックまで待機")
                 time.sleep(INTERVAL)
                 continue
 
@@ -219,6 +276,10 @@ def run_watcher() -> None:
                     else:
                         _last_retry_check = time.time()
 
+                # SIM再割り当てタスクのチェック
+                if not is_retry_running() and has_pending_reassignments():
+                    start_reassign()
+
         except KeyboardInterrupt:
             log("[停止] Ctrl+C — 監視を終了します")
             if _running_process and _running_process.poll() is None:
@@ -229,6 +290,10 @@ def run_watcher() -> None:
                 log("[停止] 実行中の retry_send.py を終了しています...")
                 _retry_process.terminate()
                 _retry_process.wait(timeout=30)
+            if _reassign_process and _reassign_process.poll() is None:
+                log("[停止] 実行中の reassign.py を終了しています...")
+                _reassign_process.terminate()
+                _reassign_process.wait(timeout=30)
             break
 
         except Exception as e:

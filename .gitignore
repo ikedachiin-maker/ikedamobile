@@ -15,3 +15,6 @@ skipped_cards.json
 entered_cards.json
 uploads/
 debug_screenshots/
+token.json.bak
+status_check_result.json
+check_status.py
