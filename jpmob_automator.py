@@ -424,7 +424,20 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
     katakana_btn.click()
 
     # モーダルが開くまで待機
-    wait.until(EC.visibility_of_element_located((By.ID, "last_name_kana")))
+    # ── ボタンクリック後にモーダルが開かない場合、手動操作との競合を疑う ──
+    try:
+        wait.until(EC.visibility_of_element_located((By.ID, "last_name_kana")))
+    except Exception:
+        # ボタンが消えていれば手動処理で先に送信されたと判断
+        try:
+            driver.find_element(By.CSS_SELECTOR, "a[data-target='#update_mnp_user_info']")
+            # ボタンがまだある → 手動処理との競合ではなく別の原因
+            print(f"[jpmob] スキップ（モーダルが開きませんでした）: card_id={card_id}")
+        except Exception:
+            # ボタンが消えた → 手動処理で先に入力済み
+            print(f"[jpmob] スキップ（手動処理済みを検出）: card_id={card_id}")
+            _add_to_entered_cards(card_id)
+        return False
 
     # フォームの各列から直接取得（姓・名は別々の列）
     last_kana   = record.get("姓（フリガナ）", "").strip()
