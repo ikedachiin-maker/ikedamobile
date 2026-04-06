@@ -156,6 +156,7 @@ python mark_all_processed.py
 | **入力済みカード追跡** | `entered_cards.json` で即記録し、スプレッドシート書き込み失敗時の再入力を防止 | `jpmob_automator.py` |
 | **スキップキャッシュ** | 開通日が古いカードをキャッシュし、次回以降の Selenium スキャンを省略 | `jpmob_automator.py` |
 | **予約番号上書き防止** | 取得済みの予約番号は再チェック時にスキップ | `jpmob_automator.py` |
+| **有効期限切れ再処理防止** | 割り当てシートに予約番号が記録済みのカードは、jpmob側で「開通済み」に戻っても絶対に再処理しない（`get_card_ids_with_reservation()`） | `assignment_sheet.py`, `jpmob_automator.py` |
 | **ヘッダー正規化** | スプレッドシートのヘッダーに含まれる改行・空白を除去 | `sheets_reader.py` |
 | **時間制限** | 8:00〜20:00のみjpmob入力を実行 | `main.py` |
 | **短いタイムアウト** | 入力済みカードを3秒で判定（15秒待たない） | `jpmob_automator.py` |
@@ -221,6 +222,12 @@ watcher.py による常時監視、または cron で定期実行:
   - XPath: `//select[.//option[normalize-space(text())='開通済み']]`
 - 全件表示: `<select>` の `value='9999999'` オプションを選択
 - カードID・電話番号の収集: `table tbody tr td a` のリンクから `href` の `/sonet_cards/{card_id}` パターンでカードIDを抽出
+
+### jpmob のステータス仕様（実機確認済み）
+
+- MNP予約番号の**有効期限が切れると、ステータスが「MNP転出中」ではなく「開通済み」に戻る**
+- これにより有効期限切れカードが新規カードと区別できなくなるため、**割り当てシートの予約番号列を再処理禁止の判定基準**としている
+- 電話番号 8015150572 で実機確認済み（2026年4月時点）
 
 ### 処理対象の絞り込み条件
 
