@@ -38,6 +38,7 @@ RETRY_SCRIPT = os.path.join(SCRIPT_DIR, "retry_send.py")
 REASSIGN_SCRIPT = os.path.join(SCRIPT_DIR, "reassign.py")
 REASSIGN_CONFIG = os.path.join(SCRIPT_DIR, "reassign_config.json")
 LOG_FILE = os.path.join(SCRIPT_DIR, "watcher.log")
+PID_FILE = os.path.join(SCRIPT_DIR, "watcher.pid")
 
 # main.py / retry_send.py / reassign.py の実行プロセスを追跡
 _running_process: subprocess.Popen | None = None
@@ -222,9 +223,45 @@ def start_reassign() -> None:
     log(f"[起動] reassign.py を起動しました (PID: {_reassign_process.pid})")
 
 
+def _acquire_pid_lock() -> bool:
+    """
+    PIDファイルで多重起動を防止する。
+    既に別プロセスが起動中なら False を返す。
+    """
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE) as f:
+                existing_pid = int(f.read().strip())
+            # プロセスが実際に生きているか確認（シグナル0で存在チェック）
+            os.kill(existing_pid, 0)
+            print(f"[多重起動防止] watcher.py はすでに起動しています (PID: {existing_pid})")
+            print(f"               停止するには: kill {existing_pid}")
+            return False
+        except (ProcessLookupError, ValueError):
+            # プロセスが存在しない（前回の異常終了でPIDファイルが残った）
+            pass
+
+    with open(PID_FILE, "w") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
+def _release_pid_lock() -> None:
+    """PIDファイルを削除する"""
+    try:
+        os.remove(PID_FILE)
+    except FileNotFoundError:
+        pass
+
+
 def run_watcher() -> None:
     """メインループ"""
     global _last_retry_check
+
+    # ── 多重起動防止 ──────────────────────────────────
+    if not _acquire_pid_lock():
+        sys.exit(1)
+
     _last_retry_check = 0.0  # Python 3.12+ の UnboundLocalError 対策
     log("=" * 55)
     log("  ikedamobile 常駐監視 開始")
@@ -294,6 +331,7 @@ def run_watcher() -> None:
                 log("[停止] 実行中の reassign.py を終了しています...")
                 _reassign_process.terminate()
                 _reassign_process.wait(timeout=30)
+            _release_pid_lock()
             break
 
         except Exception as e:
@@ -302,6 +340,8 @@ def run_watcher() -> None:
             traceback.print_exc()
 
         time.sleep(INTERVAL)
+
+    _release_pid_lock()
 
 
 if __name__ == "__main__":

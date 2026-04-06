@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- サービス識別子 -->
+    <key>Label</key>
+    <string>com.ikedamobile.watcher</string>
+
+    <!-- 起動コマンド -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/ikedayoshi/Desktop/ikedamobile/jpmob-automation/venv/bin/python3</string>
+        <string>/Users/ikedayoshi/Desktop/ikedamobile/jpmob-automation/watcher.py</string>
+    </array>
+
+    <!-- 作業ディレクトリ -->
+    <key>WorkingDirectory</key>
+    <string>/Users/ikedayoshi/Desktop/ikedamobile/jpmob-automation</string>
+
+    <!-- クラッシュ時・終了時に自動再起動 -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- launchd 読み込み時に即起動 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- ログ出力先 -->
+    <key>StandardOutPath</key>
+    <string>/Users/ikedayoshi/Desktop/ikedamobile/jpmob-automation/watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ikedayoshi/Desktop/ikedamobile/jpmob-automation/watcher_error.log</string>
+
+    <!-- 再起動間隔（クラッシュ連続時に10秒待ってから再起動） -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
