@@ -162,17 +162,37 @@ python mark_all_processed.py
 | **短いタイムアウト** | 入力済みカードを3秒で判定（15秒待たない） | `jpmob_automator.py` |
 | **手動操作との競合検出** | システム稼働中に手動で同じカードを処理した場合、モーダルが開かない＋ボタンが消えたことを検出して「手動処理済み」と判断しスキップ。jpmobは複数セッション許可のため、システムと手動の併用が可能（PC・スマホ同時ログイン確認済み） | `jpmob_automator.py` |
 
-## 定期実行（本番運用）
+## 定期実行・自動運用（本番運用）
 
-watcher.py による常時監視、または cron で定期実行:
+### watcher.py の常時監視
 
-```cron
-# 毎日 9:00 にリマインダーチェック
-0 9 * * * /path/to/venv/bin/python /path/to/reminder.py >> /path/to/reminder.log 2>&1
+`watcher.py` が5分ごとにスプレッドシートをチェックし、未処理の申し込みがあれば `main.py` を自動起動する。
 
-# 毎日 10:00 にメイン処理
-0 10 * * * /path/to/venv/bin/python /path/to/main.py >> /path/to/main.log 2>&1
+**多重起動防止（③の対策）**
+起動時に `watcher.pid` を作成し、同じプロセスがすでに起動中であれば即終了する。
+終了時（正常・Ctrl+C どちらも）に `watcher.pid` を自動削除する。
+
+**クラッシュ時の自動再起動（②の対策）**
+macOS の launchd に登録することで、watcher.py がクラッシュしても自動再起動される。
+Mac 再起動後も自動で立ち上がる。
+
+```bash
+# 登録（初回のみ）
+cp com.ikedamobile.watcher.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.ikedamobile.watcher.plist
+
+# 停止
+launchctl unload ~/Library/LaunchAgents/com.ikedamobile.watcher.plist
 ```
+
+ログは以下に出力される：
+- `watcher.log` — 通常ログ（stdout）
+- `watcher_error.log` — エラーログ（stderr）
+
+**Google OAuth 自動再認証について**
+`sheets_reader.py` の `get_credentials()` がアクセストークン期限切れ時にリフレッシュトークンで自動再取得する。
+本番モード（Google Cloud Console でアプリを公開済み）ではリフレッシュトークン自体は失効しないため、手動再認証は不要。
+※テストモード時はリフレッシュトークンが7日で失効するため手動再認証が必要だった（本番モード移行で解消済み）
 
 ## 横展開時の手順
 
