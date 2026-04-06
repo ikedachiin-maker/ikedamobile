@@ -569,8 +569,13 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
         raise ValueError("[jpmob] .env の JPMOB_USERNAME / JPMOB_PASSWORD が未設定です")
 
     # ── 既処理済みカードIDを取得（二重処理防止）─────────────
-    from assignment_sheet import get_processed_card_ids
+    from assignment_sheet import get_processed_card_ids, get_card_ids_with_reservation
     processed_card_ids = get_processed_card_ids()
+
+    # ── 予約番号記録済みカードIDを取得（有効期限切れ後の再処理・上書き防止）──
+    # jpmobで有効期限切れになるとステータスが「開通済み」に戻るため、
+    # 割り当てシートに予約番号が残っているカードは絶対に再処理しない。
+    reserved_card_ids = get_card_ids_with_reservation()
 
     # ── スキップキャッシュ読み込み（開通日が古いカードを即スキップ）──
     skip_cache = _load_skip_cache()
@@ -590,8 +595,8 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
             print("[jpmob] 開通済みカードが見つかりません")
             return []
 
-        # 既処理済みカード + スキップキャッシュ + 入力済みカード を除外
-        exclude_ids = processed_card_ids | skip_cache | entered_cards
+        # 既処理済みカード + 予約番号記録済み + スキップキャッシュ + 入力済みカード を除外
+        exclude_ids = processed_card_ids | reserved_card_ids | skip_cache | entered_cards
         open_cards = [c for c in all_open_cards if c["card_id"] not in exclude_ids]
         skipped_total = len(all_open_cards) - len(open_cards)
         if skipped_total:

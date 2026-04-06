@@ -113,6 +113,29 @@ def get_processed_card_ids() -> set[str]:
         return set()
 
 
+def get_card_ids_with_reservation() -> set[str]:
+    """
+    割り当てシートで予約番号が記録済みのカードIDを返す。
+    有効期限切れでjpmob側のステータスが「開通済み」に戻っても
+    再処理・上書きを絶対に防ぐための安全装置。
+    """
+    try:
+        worksheet = get_or_create_assignment_sheet()
+        all_rows  = worksheet.get_all_values()
+        card_col  = HEADERS.index("カードID")
+        yoyaku_col = HEADERS.index("予約番号")
+        ids = {
+            row[card_col]
+            for row in all_rows[1:]
+            if len(row) > yoyaku_col and row[card_col] and row[yoyaku_col]
+        }
+        print(f"[割り当てSheet] 予約番号記録済みカードID: {len(ids)} 件（再処理禁止）")
+        return ids
+    except Exception as e:
+        print(f"[割り当てSheet] 予約番号記録済みカードID取得エラー（空セットで続行）: {e}")
+        return set()
+
+
 def get_assignments_by_phones(phones: list[str]) -> list[dict]:
     """
     割り当てシートから指定したSIM電話番号に一致する行を取得する。
