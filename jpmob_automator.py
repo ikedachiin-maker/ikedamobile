@@ -598,9 +598,11 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
 
     # ── ⑥ entered_cards.json の整理（蓄積防止）──────────────
     # assignment_sheet に記録済みのカードは entered_cards での追跡が不要なため削除する
-    redundant = _entered_cards & (processed_card_ids | reserved_card_ids)
+    global _entered_cards
+    redundant = entered_cards & (processed_card_ids | reserved_card_ids)
     if redundant:
         _entered_cards -= redundant
+        entered_cards = set(_entered_cards)
         try:
             with open(_ENTERED_CARDS_FILE, "w") as f:
                 json.dump(
