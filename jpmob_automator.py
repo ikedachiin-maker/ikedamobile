@@ -596,6 +596,22 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
     # ── 入力済みカードID読み込み（スプレッドシート書き込み失敗時の再試行防止）──
     entered_cards = _load_entered_cards()
 
+    # ── ⑥ entered_cards.json の整理（蓄積防止）──────────────
+    # assignment_sheet に記録済みのカードは entered_cards での追跡が不要なため削除する
+    redundant = _entered_cards & (processed_card_ids | reserved_card_ids)
+    if redundant:
+        _entered_cards -= redundant
+        try:
+            with open(_ENTERED_CARDS_FILE, "w") as f:
+                json.dump(
+                    {"entered_card_ids": sorted(_entered_cards),
+                     "updated_at": datetime.now().isoformat()},
+                    f, indent=2,
+                )
+            print(f"[jpmob] entered_cards.json を整理: {len(redundant)} 件削除 → 残 {len(_entered_cards)} 件")
+        except Exception as e:
+            print(f"[jpmob] entered_cards.json 整理エラー: {e}")
+
     driver = create_driver(headless=True)
     wait   = WebDriverWait(driver, 15)
 

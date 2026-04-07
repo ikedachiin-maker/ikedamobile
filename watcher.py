@@ -39,12 +39,26 @@ REASSIGN_SCRIPT = os.path.join(SCRIPT_DIR, "reassign.py")
 REASSIGN_CONFIG = os.path.join(SCRIPT_DIR, "reassign_config.json")
 LOG_FILE = os.path.join(SCRIPT_DIR, "watcher.log")
 PID_FILE = os.path.join(SCRIPT_DIR, "watcher.pid")
+MAX_LOG_BYTES = 10 * 1024 * 1024  # 10MB でローテーション
 
-# main.py / retry_send.py / reassign.py の実行プロセスを追跡
+# main.py / retry_send.py / reassign.py の実行プロセスとログハンドルを追跡
 _running_process: subprocess.Popen | None = None
 _retry_process: subprocess.Popen | None = None
 _reassign_process: subprocess.Popen | None = None
+_running_log = None   # ④⑤ ファイルハンドルリーク対策
+_retry_log   = None
+_reassign_log = None
 _last_retry_check: float = 0  # 最後にリトライチェックした時刻
+
+
+def _rotate_log(log_path: str) -> None:
+    """④ ログファイルが MAX_LOG_BYTES を超えたら .old にリネームしてローテーション"""
+    if os.path.exists(log_path) and os.path.getsize(log_path) > MAX_LOG_BYTES:
+        old_path = log_path + ".old"
+        if os.path.exists(old_path):
+            os.remove(old_path)
+        os.rename(log_path, old_path)
+        print(f"[ログ] ローテーション: {os.path.basename(log_path)} → .old", flush=True)
 
 
 def log(msg: str) -> None:
@@ -61,13 +75,16 @@ def is_operational_hours() -> bool:
 
 def is_main_running() -> bool:
     """main.py がまだ実行中かチェック"""
-    global _running_process
+    global _running_process, _running_log
     if _running_process is None:
         return False
     retcode = _running_process.poll()
     if retcode is None:
         return True  # まだ実行中
-    # 終了済み
+    # 終了済み → ⑤ ファイルハンドルを閉じる
+    if _running_log:
+        _running_log.close()
+        _running_log = None
     if retcode == 0:
         log(f"[完了] main.py が正常終了しました (exit code: {retcode})")
     else:
@@ -100,15 +117,17 @@ def has_unprocessed_records() -> bool:
 
 def start_main() -> None:
     """main.py をサブプロセスで起動"""
-    global _running_process
+    global _running_process, _running_log
 
     log("[起動] main.py を開始します...")
 
-    main_log = open(os.path.join(SCRIPT_DIR, "main.log"), "a")
+    log_path = os.path.join(SCRIPT_DIR, "main.log")
+    _rotate_log(log_path)  # ④ ローテーション
+    _running_log = open(log_path, "a")  # ⑤ ハンドルを変数で管理
     _running_process = subprocess.Popen(
         [PYTHON, MAIN_SCRIPT],
         cwd=SCRIPT_DIR,
-        stdout=main_log,
+        stdout=_running_log,
         stderr=subprocess.STDOUT,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
@@ -145,12 +164,15 @@ def has_pending_reservations() -> bool:
 
 def is_retry_running() -> bool:
     """retry_send.py がまだ実行中かチェック"""
-    global _retry_process
+    global _retry_process, _retry_log
     if _retry_process is None:
         return False
     retcode = _retry_process.poll()
     if retcode is None:
         return True
+    if _retry_log:
+        _retry_log.close()
+        _retry_log = None
     if retcode == 0:
         log(f"[完了] retry_send.py が正常終了しました")
     else:
@@ -161,15 +183,17 @@ def is_retry_running() -> bool:
 
 def start_retry() -> None:
     """retry_send.py をサブプロセスで起動"""
-    global _retry_process, _last_retry_check
+    global _retry_process, _retry_log, _last_retry_check
 
     log("[起動] retry_send.py を開始します...")
 
-    retry_log = open(os.path.join(SCRIPT_DIR, "retry_send.log"), "a")
+    log_path = os.path.join(SCRIPT_DIR, "retry_send.log")
+    _rotate_log(log_path)
+    _retry_log = open(log_path, "a")
     _retry_process = subprocess.Popen(
         [PYTHON, RETRY_SCRIPT],
         cwd=SCRIPT_DIR,
-        stdout=retry_log,
+        stdout=_retry_log,
         stderr=subprocess.STDOUT,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
@@ -192,12 +216,15 @@ def has_pending_reassignments() -> bool:
 
 def is_reassign_running() -> bool:
     """reassign.py がまだ実行中かチェック"""
-    global _reassign_process
+    global _reassign_process, _reassign_log
     if _reassign_process is None:
         return False
     retcode = _reassign_process.poll()
     if retcode is None:
         return True
+    if _reassign_log:
+        _reassign_log.close()
+        _reassign_log = None
     if retcode == 0:
         log(f"[完了] reassign.py が正常終了しました")
     else:
@@ -208,15 +235,17 @@ def is_reassign_running() -> bool:
 
 def start_reassign() -> None:
     """reassign.py をサブプロセスで起動"""
-    global _reassign_process
+    global _reassign_process, _reassign_log
 
     log("[起動] reassign.py を開始します...")
 
-    reassign_log = open(os.path.join(SCRIPT_DIR, "reassign.log"), "a")
+    log_path = os.path.join(SCRIPT_DIR, "reassign.log")
+    _rotate_log(log_path)
+    _reassign_log = open(log_path, "a")
     _reassign_process = subprocess.Popen(
         [PYTHON, REASSIGN_SCRIPT],
         cwd=SCRIPT_DIR,
-        stdout=reassign_log,
+        stdout=_reassign_log,
         stderr=subprocess.STDOUT,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
