@@ -222,9 +222,9 @@ def get_sex_value(record: dict) -> str:
     性別が不明・未入力の場合は空文字を返す（必須項目チェックで弾かせる）。
     """
     sex_raw = record.get("性別", "").strip().lower()
-    if sex_raw in ("女性", "female", "f"):
+    if sex_raw in ("女性", "female", "f", "female(女性)", "女性(female)"):
         return "female"
-    if sex_raw in ("男性", "male", "m"):
+    if sex_raw in ("男性", "male", "m", "male(男性)", "男性(male)"):
         return "male"
     # 未入力・不明の場合は空文字を返す
     # → 必須項目チェックでスキップされ、誤った性別で登録されるのを防ぐ
