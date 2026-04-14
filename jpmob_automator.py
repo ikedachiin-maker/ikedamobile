@@ -119,19 +119,38 @@ def create_driver(headless: bool = False) -> webdriver.Chrome:
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1280,900")
-    service = Service(ChromeDriverManager().install())
+
+    # ── chromedriver のパス解決 ──────────────────────────────
+    # 2026-04-12 インシデント対策:
+    #   webdriver-manager が自動取得した 147.0.7727.56 chromedriver が
+    #   macOS Gatekeeper/署名の関係で SIGKILL されて起動できなくなった。
+    #   `.env` の JPMOB_CHROMEDRIVER_PATH で既知の動作する driver を固定指定できる。
+    #   設定されていない場合は従来どおり webdriver-manager にフォールバック。
+    chromedriver_path = os.getenv("JPMOB_CHROMEDRIVER_PATH", "").strip()
+    if chromedriver_path and os.path.exists(chromedriver_path):
+        print(f"[jpmob] chromedriver 固定パス使用: {chromedriver_path}")
+        service = Service(executable_path=chromedriver_path)
+    else:
+        service = Service(ChromeDriverManager().install())
+
     driver = webdriver.Chrome(service=service, options=options)
     driver.implicitly_wait(10)
     return driver
 
 
 def login(driver, wait, username: str, password: str) -> None:
+    if not username or not password:
+        raise ValueError("[jpmob] JPMOB_USERNAME / JPMOB_PASSWORD が未設定です")
     print(f"[jpmob] ログイン中...")
     driver.get(LOGIN_URL)
     wait.until(EC.presence_of_element_located((By.ID, "admin_user_email"))).send_keys(username)
     driver.find_element(By.ID, "admin_user_password").send_keys(password)
     driver.find_element(By.CSS_SELECTOR, "input[type='submit']").click()
     wait.until(EC.url_changes(LOGIN_URL))
+    # ログイン後のページがログインページでないことを確認
+    current = driver.current_url
+    if "sign_in" in current:
+        raise RuntimeError(f"[jpmob] ログイン失敗: パスワード誤り or CAPTCHA（URL: {current}）")
     print("[jpmob] ログイン完了")
     time.sleep(1)
 
@@ -158,17 +177,22 @@ def get_open_cards(driver, wait) -> list[dict]:
         Select(per_page).select_by_value("9999999")
         time.sleep(2)
     except Exception:
-        pass
+        print("[jpmob] ⚠️ 全件表示セレクタが見つかりません — 一部のカードしか取得できない可能性があります")
 
     # 電話番号リンクからカードIDと電話番号を収集
     links = driver.find_elements(By.CSS_SELECTOR, "table tbody tr td a")
     open_cards = []
+    seen_card_ids = set()
     for link in links:
         href = link.get_attribute("href") or ""
         text = link.text.strip()
         m = re.search(r"/sonet_cards/(\d+)", href)
-        if m and text:
-            open_cards.append({"phone": text, "card_id": m.group(1)})
+        # 電話番号パターン（数字のみ）のリンクだけを収集し、重複を排除
+        if m and text and re.fullmatch(r"\d{10,11}", text):
+            card_id = m.group(1)
+            if card_id not in seen_card_ids:
+                seen_card_ids.add(card_id)
+                open_cards.append({"phone": text, "card_id": card_id})
 
     print(f"[jpmob] 開通済みカード: {len(open_cards)} 件")
     return open_cards
@@ -204,9 +228,11 @@ def normalize_birthday(birthday_str) -> str:
     m = re.match(r"(\d{4})年(\d{1,2})月(\d{1,2})日", s)
     if m:
         return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    for fmt in ["%Y%m%d", "%d/%m/%Y"]:
+    # YYYYMMDD（例: 19900320）のみ自動変換。
+    # %d/%m/%Y は月日逆転リスクが高いため対応しない。
+    if re.match(r"^\d{8}$", s):
         try:
-            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+            return datetime.strptime(s, "%Y%m%d").strftime("%Y-%m-%d")
         except ValueError:
             pass
     return s
@@ -275,6 +301,78 @@ def get_card_status(driver) -> str:
         except Exception:
             continue
     return ""
+
+
+def _get_existing_reservation_on_page(driver) -> str:
+    """
+    現在開いているカード詳細ページ（プランタブ）の MNP転出テーブルから
+    既存の予約番号を読み取る。
+
+    過去に別の顧客で予約番号が発行されているカードを検知するための
+    安全機構B（2026-04-11 加村/文原 インシデント対策）。
+
+    Returns: 予約番号（文字列）、無ければ空文字
+    """
+    try:
+        cells = driver.find_elements(By.XPATH,
+            "//h2[normalize-space()='MNP転出']/following-sibling::table[1]//td"
+        )
+        data = {}
+        for i in range(0, len(cells) - 1, 2):
+            data[cells[i].text.strip()] = cells[i + 1].text.strip()
+        return data.get("予約番号", "").strip()
+    except Exception:
+        return ""
+
+
+def _read_modal_existing_values(driver) -> dict:
+    """
+    ユーザー情報モーダル内の氏名・生年月日フィールドの現在値を読み取る。
+
+    clear() + send_keys() で既存データを破壊する前に呼び出し、
+    1つでも値が入っていれば別人のデータと判断してスキップする
+    安全機構A（2026-04-11 加村/文原 インシデント対策）。
+
+    注意: sex (<select>) は判定対象外。jpmob の <select> はデフォルトが 'male' であり、
+    未入力でも 'male' を返すため false positive の原因になる (2026-04-12 修正)。
+
+    Returns: {field_id: value} の dict（いずれかに値があれば既存データあり）
+    """
+    result = {}
+    for fid in ("last_name_kana", "first_name_kana", "last_name", "first_name", "birthday"):
+        try:
+            el = driver.find_element(By.ID, fid)
+            result[fid] = (el.get_attribute("value") or "").strip()
+        except Exception:
+            result[fid] = ""
+    return result
+
+
+def _close_user_info_modal(driver) -> None:
+    """
+    ユーザー情報モーダルを閉じる（既存データ検出でスキップする際に使用）。
+    閉じられない場合は何もしない（次の driver.get() でリセットされる）。
+    """
+    try:
+        # Bootstrap の閉じるボタン or キャンセルボタンを探す
+        for selector in (
+            "#update_mnp_user_info button.close",
+            "#update_mnp_user_info [data-dismiss='modal']",
+        ):
+            try:
+                btn = driver.find_element(By.CSS_SELECTOR, selector)
+                if btn.is_displayed():
+                    btn.click()
+                    time.sleep(0.5)
+                    return
+            except Exception:
+                continue
+        # 最終手段: Esc キーを送る
+        from selenium.webdriver.common.keys import Keys
+        driver.find_element(By.ID, "last_name_kana").send_keys(Keys.ESCAPE)
+        time.sleep(0.5)
+    except Exception:
+        pass
 
 
 def _verify_submission(driver, card_id: str) -> bool:
@@ -373,11 +471,26 @@ def enter_user_info(driver, wait, card_id: str, record: dict) -> bool:
         return False
 
 
+def _relogin_if_needed(driver, wait, username: str, password: str) -> None:
+    """セッションタイムアウト検知 — ログインページにリダイレクトされていたら再ログイン"""
+    if "sign_in" in driver.current_url:
+        print("[jpmob] ⚠️ セッションタイムアウト検出 — 再ログインします")
+        login(driver, wait, username, password)
+
+
 def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
     """enter_user_info の実処理"""
     url = f"https://console.jpmob.jp/sonet_cards/{card_id}?locale=ja"
     driver.get(url)
     time.sleep(1)
+
+    # セッションタイムアウト検知
+    if "sign_in" in driver.current_url:
+        username = os.getenv("JPMOB_USERNAME")
+        password = os.getenv("JPMOB_PASSWORD")
+        _relogin_if_needed(driver, wait, username, password)
+        driver.get(url)
+        time.sleep(1)
 
     # ── 状態チェック（MNP転出中・解約はスキップ）──────────
     status = get_card_status(driver)
@@ -408,8 +521,22 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
     )).click()
     time.sleep(1)
 
+    # ── 安全機構B: 既に MNP予約番号 が発行済みのカードはスキップ ──
+    # 過去に別の顧客（手動処理含む）で予約番号が発行されているカードは、
+    # モーダルが開いても jpmob 側が更新を silent に拒否する可能性があるため
+    # 絶対に上書きしない。(2026-04-11 加村/文原 インシデント対策)
+    existing_yoyaku = _get_existing_reservation_on_page(driver)
+    if existing_yoyaku:
+        print(
+            f"[jpmob] スキップ（既存の予約番号を検出）: card_id={card_id} "
+            f"— 予約番号={existing_yoyaku}（別人の可能性あり、上書き禁止）"
+        )
+        # 「別人が使用済み」なので entered_cards ではなく skip_cache に入れる
+        _skip_cache.add(card_id)
+        return False
+
     # カタカナ更新ボタン（モーダルトリガー）をクリック
-    # ── 既に情報入力済みのカードではボタンが表示されないため、短いタイムアウト（3秒）で判定 ──
+    # ── ボタンは入力済みでも表示され続ける（jpmob仕様）が、稀に消える場合があるため短いタイムアウト（3秒）で判定 ──
     short_wait = WebDriverWait(driver, 3)
     try:
         katakana_btn = short_wait.until(EC.element_to_be_clickable(
@@ -439,6 +566,20 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
             _add_to_entered_cards(card_id)
         return False
 
+    # ── 安全機構A: モーダル内の既存フィールドをチェック ──
+    # clear() + send_keys() で上書きする前に、既存値を読み取る。
+    # 氏名系 or 生年月日 のいずれかに値があれば別人のデータの可能性があるため絶対に上書きしない。
+    # (2026-04-11 加村/文原 インシデント対策)
+    existing_values = _read_modal_existing_values(driver)
+    if any(existing_values.values()):
+        print(
+            f"[jpmob] スキップ（モーダルに既存データを検出）: card_id={card_id} "
+            f"— 既存={existing_values}（別人の可能性あり、上書き禁止）"
+        )
+        _close_user_info_modal(driver)
+        _add_to_entered_cards(card_id)
+        return False
+
     # フォームの各列から直接取得（姓・名は別々の列）
     last_kana   = record.get("姓（フリガナ）", "").strip()
     first_kana  = record.get("名（フリガナ）", "").strip()
@@ -462,6 +603,7 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
             f"[jpmob] スキップ（必須項目が不足）: card_id={card_id} "
             f"— 不足: {', '.join(missing)}"
         )
+        _close_user_info_modal(driver)
         return False
 
     # ── デバッグ: 入力データをログ出力 ──
@@ -501,15 +643,16 @@ def _enter_user_info_impl(driver, wait, card_id: str, record: dict) -> bool:
     # ── 送信結果を検証 ──────────────────────────
     submit_ok = _verify_submission(driver, card_id)
 
-    # 入力済みとして即ファイルに記録（Step3失敗時の再試行防止）
-    _add_to_entered_cards(card_id)
-
     if submit_ok:
+        # 検証OK → 入力済みとして記録し、次回スキップ
+        _add_to_entered_cards(card_id)
         print(f"[jpmob] ✅ 入力完了（検証OK）: card_id={card_id}")
+        return True
     else:
-        print(f"[jpmob] ⚠️ 入力完了（検証失敗 — 送信結果が確認できません）: card_id={card_id}")
-
-    return True
+        # 検証失敗 → entered_cards に記録しない（次回再試行可能）
+        # 安全機構A が二重入力を防ぐため、仮にデータが書かれていても安全
+        print(f"[jpmob] ❌ 送信失敗（検証NG）: card_id={card_id} — 次回再試行します")
+        return False
 
 
 # ─────────────────────────────────────────────
@@ -525,6 +668,13 @@ def get_reservation_info(driver, wait, card_id: str) -> tuple[str, str, str]:
     try:
         url = f"https://console.jpmob.jp/sonet_cards/{card_id}?locale=ja"
         driver.get(url)
+
+        # セッションタイムアウト検知
+        if "sign_in" in driver.current_url:
+            username = os.getenv("JPMOB_USERNAME")
+            password = os.getenv("JPMOB_PASSWORD")
+            _relogin_if_needed(driver, wait, username, password)
+            driver.get(url)
 
         # 電話番号をメイン情報から取得
         phone = ""
@@ -679,6 +829,19 @@ def input_to_jpmob(records: list[dict]) -> list[dict]:
                     "expiry_date":   "",
                 })
                 lines_assigned += 1
+
+            # 部分割り当て検出: 必要回線数に満たない場合は不完全な分を取り消す
+            if lines_assigned > 0 and lines_assigned < num_lines:
+                name = f"{record.get('姓（漢字）','')} {record.get('名（漢字）','')}".strip() \
+                       or record.get('名前', '')
+                print(
+                    f"[jpmob] ⚠️ 部分割り当て検出: {name} — "
+                    f"{num_lines} 回線中 {lines_assigned} 回線のみ成功。"
+                    f"不完全な割り当てを取り消します"
+                )
+                # 不完全な割り当てを assignments から除去
+                for _ in range(lines_assigned):
+                    assignments.pop()
 
         print(f"[jpmob] 入力完了: 合計 {len(assignments)} 件")
 
