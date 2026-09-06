@@ -7,8 +7,7 @@
 """
 
 import os
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 
 import gspread
 from dotenv import load_dotenv
@@ -52,10 +51,11 @@ RECONCILIATION_HEADERS = [
 ]
 
 _app_worksheet_cache: gspread.Worksheet | None = None
+JST = timezone(timedelta(hours=9), name="JST")
 
 
 def _now_jst() -> str:
-    return datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y/%m/%d %H:%M:%S")
+    return datetime.now(JST).strftime("%Y/%m/%d %H:%M:%S")
 
 
 def _open_sheet(sheet_name: str, headers: list[str]) -> gspread.Worksheet:
