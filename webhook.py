@@ -35,7 +35,11 @@ ALLOWED_DOC_EXTS = {".jpg", ".jpeg", ".png", ".pdf", ".heic", ".heif"}
 MAX_DOC_SIZE     = 10 * 1024 * 1024  # 10MB
 
 from reminder import send_form_link, load_reminder_log, save_reminder_log
-from application_sheet import append_application_record
+from payment_reconciliation import (
+    create_payment_intent_with_queue,
+    get_reconciliation_summary,
+    record_succeeded_payment,
+)
 from drive_uploader import upload_file_to_drive
 
 # LP フォルダのパス（Railway では jpmob-automation/lp/ を使用）
@@ -72,6 +76,26 @@ def stripe_webhook():
     except Exception as e:
         print(f"[Webhook] リクエスト解析エラー: {e}")
         return jsonify({"error": str(e)}), 400
+
+    if event["type"] == "payment_intent.succeeded":
+        payment_intent_id = event["data"]["object"].get("id", "")
+        if not payment_intent_id:
+            return jsonify({"status": "skipped"}), 200
+
+        try:
+            result = record_succeeded_payment(payment_intent_id)
+        except Exception as error:
+            print(
+                "[Webhook] 決済照合エラー: "
+                f"payment_id={payment_intent_id}, error={error}"
+            )
+            return jsonify({"status": "retry"}), 500
+
+        if result.get("status") == "recorded":
+            return jsonify({"status": "recorded"}), 200
+
+        # 照合キューが回収するため、Stripe への受領応答は返す。
+        return jsonify({"status": result.get("status", "pending")}), 202
 
     if event["type"] == "checkout.session.completed":
         session    = event["data"]["object"]
@@ -189,6 +213,13 @@ def health_check():
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
     results["checks"]["drive_folder_id"] = folder_id if folder_id else "not set (will use root)"
 
+    # 決済照合キュー
+    try:
+        results["checks"]["payment_reconciliation"] = get_reconciliation_summary()
+    except Exception as error:
+        results["checks"]["payment_reconciliation"] = f"error: {error}"
+        results["status"] = "degraded"
+
     return jsonify(results)
 
 
@@ -227,38 +258,31 @@ def upload_document():
 # Stripe PaymentIntent 作成
 # ─────────────────────────────────────────────
 
-PLAN_PRICES = {
-    "consul":  3000,
-    "online":  3300,
-    "general": 3600,
-}
-
-
 @app.route("/api/payment-intent", methods=["POST"])
 def create_payment_intent():
-    data  = request.get_json(silent=True) or {}
-    plan  = data.get("plan", "general")
-    lines = max(1, min(10, int(data.get("lines", 1))))
-    email = data.get("email", "")
-
-    unit_price = PLAN_PRICES.get(plan, 3600)
-    amount     = unit_price * lines
+    data = request.get_json(silent=True) or {}
 
     try:
-        intent = stripe.PaymentIntent.create(
-            amount=amount,
-            currency="jpy",
-            receipt_email=email or None,
-            metadata={
-                "plan":  plan,
-                "lines": str(lines),
-                "email": email,
-            },
-        )
-        return jsonify({"client_secret": intent.client_secret, "amount": amount})
-    except Exception as e:
-        print(f"[PaymentIntent] エラー: {e}")
-        return jsonify({"error": str(e)}), 500
+        intent, snapshot = create_payment_intent_with_queue(data)
+        return jsonify(
+            {
+                "client_secret": intent.client_secret,
+                "amount": int(intent.amount) // 100,
+                "application_id": snapshot["application_id"],
+            }
+        ), 200
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        print(f"[PaymentIntent] 照合キュー保存エラー: {error}")
+        return jsonify(
+            {
+                "error": (
+                    "申し込み情報の保存を確認できませんでした。"
+                    "時間をおいてもう一度お試しください。"
+                )
+            }
+        ), 503
 
 
 # ─────────────────────────────────────────────
@@ -267,50 +291,29 @@ def create_payment_intent():
 
 @app.route("/api/complete", methods=["POST"])
 def complete_order():
-    data              = request.get_json(silent=True) or {}
-    payment_intent_id = data.get("payment_intent_id", "")
+    data = request.get_json(silent=True) or {}
+    payment_intent_id = str(data.get("payment_intent_id", "")).strip()
 
-    # ── 決済確認 ──────────────────────────────────────────
-    try:
-        intent = stripe.PaymentIntent.retrieve(payment_intent_id)
-        if intent.status != "succeeded":
-            print(f"[complete] 決済未完了: {intent.status}")
-            return jsonify({"error": "決済が完了していません"}), 400
-    except Exception as e:
-        print(f"[complete] PaymentIntent 取得エラー: {e}")
-        return jsonify({"error": str(e)}), 400
-
-    email  = data.get("email", "")
-    plan   = data.get("plan", "general")
-    lines  = int(data.get("lines", 1))
-    amount = PLAN_PRICES.get(plan, 3600) * lines
-    print(f"[complete] 申し込み受付: {email} / プラン={plan} / {lines}回線 / {amount}円")
-
-    # ── 申し込み管理タブに書き込み ────────────────────────
-    record = {
-        "タイムスタンプ":  datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
-        "姓（漢字）":      data.get("last_kanji", ""),
-        "名（漢字）":      data.get("first_kanji", ""),
-        "姓（フリガナ）":  data.get("last_kana", ""),
-        "名（フリガナ）":  data.get("first_kana", ""),
-        "生年月日":        data.get("birthday", ""),
-        "性別":            data.get("sex", ""),
-        "メールアドレス":  email,
-        "プラン":          plan,
-        "申込回線数":      str(lines),
-        "決済金額":        str(amount),
-        "決済ID":          payment_intent_id,
-        "本人確認書類":    data.get("document_id", ""),
-        "予約番号案内":    "",
-    }
+    if not payment_intent_id:
+        return jsonify({"error": "決済情報を確認できません"}), 400
 
     try:
-        append_application_record(record)
-    except Exception as e:
-        print(f"[complete] 申し込み管理タブ書き込みエラー（続行）: {e}")
+        result = record_succeeded_payment(payment_intent_id, data)
+    except Exception as error:
+        # 決済後の一時エラーは照合キューで回収する。
+        print(
+            "[complete] 決済照合が保留になりました: "
+            f"payment_id={payment_intent_id}, error={error}"
+        )
+        return jsonify({"status": "pending"}), 202
 
-    # jpmob 自動入力（main.py）は Mac 上の cron で毎日 10:00 に実行されます
-    return jsonify({"status": "ok"}), 200
+    if result.get("status") == "recorded":
+        return jsonify({"status": "recorded"}), 200
+
+    if result.get("status") == "not_succeeded":
+        return jsonify({"error": "決済が完了していません"}), 400
+
+    return jsonify({"status": "pending"}), 202
 
 
 if __name__ == "__main__":
