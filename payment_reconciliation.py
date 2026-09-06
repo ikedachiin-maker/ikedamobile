@@ -9,8 +9,7 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 
 import stripe
 
@@ -29,6 +28,8 @@ PLAN_PRICES = {
     "general": 3600,
 }
 
+JST = timezone(timedelta(hours=9), name="JST")
+
 SNAPSHOT_FIELDS = (
     "last_kanji",
     "first_kanji",
@@ -41,13 +42,13 @@ SNAPSHOT_FIELDS = (
 
 
 def _now_jst() -> str:
-    return datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y/%m/%d %H:%M:%S")
+    return datetime.now(JST).strftime("%Y/%m/%d %H:%M:%S")
 
 
 def _payment_time_jst(created_at: int | None) -> str:
     if not created_at:
         return _now_jst()
-    return datetime.fromtimestamp(created_at, ZoneInfo("Asia/Tokyo")).strftime(
+    return datetime.fromtimestamp(created_at, JST).strftime(
         "%Y/%m/%d %H:%M:%S"
     )
 
