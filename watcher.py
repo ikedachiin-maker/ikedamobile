@@ -31,6 +31,9 @@ load_dotenv()
 # ─── 設定 ─────────────────────────────────────────────
 INTERVAL = int(os.getenv("WATCHER_INTERVAL_SECONDS", "300"))  # 5分
 RETRY_CHECK_INTERVAL = int(os.getenv("RETRY_CHECK_INTERVAL_SECONDS", "1800"))  # 30分
+PAYMENT_RECONCILIATION_INTERVAL = int(
+    os.getenv("PAYMENT_RECONCILIATION_INTERVAL_SECONDS", "300")
+)  # 5分
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PYTHON = sys.executable  # 現在の仮想環境の Python
 MAIN_SCRIPT = os.path.join(SCRIPT_DIR, "main.py")
@@ -49,6 +52,7 @@ _running_log = None   # ④⑤ ファイルハンドルリーク対策
 _retry_log   = None
 _reassign_log = None
 _last_retry_check: float = 0  # 最後にリトライチェックした時刻
+_last_payment_reconciliation: float = 0  # 最後に決済照合した時刻
 
 
 def _rotate_log(log_path: str) -> None:
@@ -66,6 +70,29 @@ def log(msg: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line, flush=True)
+
+
+def run_payment_reconciliation_if_due() -> None:
+    """決済照合は jpmob の稼働時間に関係なく、終日定期実行する。"""
+    global _last_payment_reconciliation
+
+    if time.time() - _last_payment_reconciliation < PAYMENT_RECONCILIATION_INTERVAL:
+        return
+
+    _last_payment_reconciliation = time.time()
+    try:
+        from payment_reconciliation import reconcile_recent_payments
+
+        result = reconcile_recent_payments()
+        log(
+            "[決済照合] "
+            f"確認 {result['checked']} 件 / "
+            f"登録 {result['recorded']} 件 / "
+            f"保留 {result['pending']} 件 / "
+            f"要確認 {result['needs_review']} 件"
+        )
+    except Exception as error:
+        log(f"[決済照合] 実行失敗: {error}")
 
 
 def is_operational_hours() -> bool:
@@ -285,23 +312,30 @@ def _release_pid_lock() -> None:
 
 def run_watcher() -> None:
     """メインループ"""
-    global _last_retry_check
+    global _last_retry_check, _last_payment_reconciliation
 
     # ── 多重起動防止 ──────────────────────────────────
     if not _acquire_pid_lock():
         sys.exit(1)
 
     _last_retry_check = 0.0  # Python 3.12+ の UnboundLocalError 対策
+    _last_payment_reconciliation = 0.0
     log("=" * 55)
     log("  ikedamobile 常駐監視 開始")
     log(f"  チェック間隔: {INTERVAL}秒（{INTERVAL // 60}分）")
     log(f"  稼働時間帯: 8:00〜20:00")
+    log(
+        f"  決済照合: {PAYMENT_RECONCILIATION_INTERVAL}秒ごと（24時間）"
+    )
     log(f"  Python: {PYTHON}")
     log("=" * 55)
 
     while True:
         try:
             now = datetime.now()
+
+            # 決済照合は時間帯に関係なく実行する。
+            run_payment_reconciliation_if_due()
 
             # 時間外はスキップ
             if not is_operational_hours():
