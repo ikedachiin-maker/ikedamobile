@@ -49,6 +49,31 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB（余裕を持たせる）
 
 
+def stripe_webhook_health() -> tuple[bool, str]:
+    """Stripe側で決済成功イベントを受信する設定になっているか確認する。"""
+    expected_url = os.getenv(
+        "STRIPE_WEBHOOK_URL", "https://ikedamobile.com/webhook"
+    ).strip().rstrip("/")
+
+    endpoints = stripe.WebhookEndpoint.list(limit=100)
+    endpoint = next(
+        (
+            item
+            for item in endpoints.auto_paging_iter()
+            if str(getattr(item, "url", "")).rstrip("/") == expected_url
+        ),
+        None,
+    )
+    if endpoint is None:
+        return False, "payment_intent.succeeded を受け取るWebhookが未設定です"
+
+    enabled_events = set(getattr(endpoint, "enabled_events", []) or [])
+    if "*" not in enabled_events and "payment_intent.succeeded" not in enabled_events:
+        return False, "payment_intent.succeeded がWebhookの受信イベントに含まれていません"
+
+    return True, "ok"
+
+
 @app.errorhandler(413)
 def request_entity_too_large(error):
     return jsonify({"error": "ファイルサイズが大きすぎます。10MB以内にしてください。"}), 413
@@ -64,22 +89,25 @@ def stripe_webhook():
     sig_header = request.headers.get("Stripe-Signature", "")
     secret     = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
+    if not secret:
+        print("[Webhook] STRIPE_WEBHOOK_SECRET が未設定です")
+        return jsonify({"error": "Webhook signing secret is not configured"}), 500
+
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, secret)
     except stripe.SignatureVerificationError as e:
-        print(f"[Webhook] 署名検証失敗（スキップして続行）: {e}")
-        import json
-        try:
-            event = json.loads(payload)
-        except Exception:
-            return jsonify({"error": "Invalid payload"}), 400
+        print(f"[Webhook] 署名検証失敗: {e}")
+        return jsonify({"error": "Invalid signature"}), 400
     except Exception as e:
         print(f"[Webhook] リクエスト解析エラー: {e}")
         return jsonify({"error": str(e)}), 400
 
     if event["type"] == "payment_intent.succeeded":
-        payment_intent_id = event["data"]["object"].get("id", "")
+        payment_intent = event["data"]["object"]
+        payment_intent_id = payment_intent.get("id", "")
         if not payment_intent_id:
+            return jsonify({"status": "skipped"}), 200
+        if not (payment_intent.get("metadata") or {}).get("application_id"):
             return jsonify({"status": "skipped"}), 200
 
         try:
@@ -94,8 +122,13 @@ def stripe_webhook():
         if result.get("status") == "recorded":
             return jsonify({"status": "recorded"}), 200
 
-        # 照合キューが回収するため、Stripe への受領応答は返す。
-        return jsonify({"status": result.get("status", "pending")}), 202
+        # 申込管理へ反映できるまで成功応答を返さない。
+        # Stripeの再送キューを使い、Mac miniの監視停止時でも回収する。
+        print(
+            "[Webhook] 申込管理への反映が未完了のため再送待ち: "
+            f"payment_id={payment_intent_id}, status={result.get('status', 'pending')}"
+        )
+        return jsonify({"status": "retry"}), 500
 
     if event["type"] == "checkout.session.completed":
         session    = event["data"]["object"]
@@ -218,6 +251,16 @@ def health_check():
         results["checks"]["payment_reconciliation"] = get_reconciliation_summary()
     except Exception as error:
         results["checks"]["payment_reconciliation"] = f"error: {error}"
+        results["status"] = "degraded"
+
+    # Stripe Webhook設定
+    try:
+        webhook_ok, webhook_detail = stripe_webhook_health()
+        results["checks"]["stripe_webhook"] = webhook_detail
+        if not webhook_ok:
+            results["status"] = "degraded"
+    except Exception as error:
+        results["checks"]["stripe_webhook"] = f"error: {error}"
         results["status"] = "degraded"
 
     return jsonify(results)
