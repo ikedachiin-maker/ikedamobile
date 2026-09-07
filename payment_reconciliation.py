@@ -41,6 +41,20 @@ SNAPSHOT_FIELDS = (
 )
 
 
+def _stripe_resource_to_dict(resource) -> dict:
+    """Stripe SDK のリソースと dict を同じ形で扱う。"""
+    if isinstance(resource, dict):
+        return resource
+
+    to_dict = getattr(resource, "to_dict", None)
+    if callable(to_dict):
+        value = to_dict()
+        if isinstance(value, dict):
+            return value
+
+    return {}
+
+
 def _now_jst() -> str:
     return datetime.now(JST).strftime("%Y/%m/%d %H:%M:%S")
 
@@ -151,13 +165,13 @@ def _load_snapshot(record: dict) -> dict:
 
 
 def _snapshot_matches_intent(snapshot: dict, intent) -> bool:
-    metadata = dict(getattr(intent, "metadata", {}) or {})
+    metadata = _stripe_resource_to_dict(getattr(intent, "metadata", {}))
     return (
         metadata.get("application_id") == str(snapshot["application_id"])
         and metadata.get("plan") == str(snapshot["plan"])
         and metadata.get("lines") == str(snapshot["lines"])
         and metadata.get("email", "").lower() == str(snapshot["email"]).lower()
-        and int(getattr(intent, "amount", 0)) == int(snapshot["amount"]) * 100
+        and int(getattr(intent, "amount", 0)) == int(snapshot["amount"])
     )
 
 
@@ -282,7 +296,8 @@ def reconcile_recent_payments() -> dict:
     for intent in intents.auto_paging_iter():
         if intent.status != "succeeded":
             continue
-        if not dict(getattr(intent, "metadata", {}) or {}).get("application_id"):
+        metadata = _stripe_resource_to_dict(getattr(intent, "metadata", {}))
+        if not metadata.get("application_id"):
             continue
 
         summary["checked"] += 1
