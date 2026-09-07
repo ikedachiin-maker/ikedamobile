@@ -49,6 +49,20 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB（余裕を持たせる）
 
 
+def stripe_resource_to_dict(resource):
+    """Stripe SDK のリソースと dict を同じ形で扱う。"""
+    if isinstance(resource, dict):
+        return resource
+
+    to_dict = getattr(resource, "to_dict", None)
+    if callable(to_dict):
+        value = to_dict()
+        if isinstance(value, dict):
+            return value
+
+    return {}
+
+
 def stripe_webhook_health() -> tuple[bool, str]:
     """Stripe側で決済成功イベントを受信する設定になっているか確認する。"""
     expected_url = os.getenv(
@@ -103,7 +117,7 @@ def stripe_webhook():
         return jsonify({"error": str(e)}), 400
 
     if event["type"] == "payment_intent.succeeded":
-        payment_intent = event["data"]["object"]
+        payment_intent = stripe_resource_to_dict(event["data"]["object"])
         payment_intent_id = payment_intent.get("id", "")
         if not payment_intent_id:
             return jsonify({"status": "skipped"}), 200
@@ -131,7 +145,7 @@ def stripe_webhook():
         return jsonify({"status": "retry"}), 500
 
     if event["type"] == "checkout.session.completed":
-        session    = event["data"]["object"]
+        session    = stripe_resource_to_dict(event["data"]["object"])
         payment_id = session.get("id", "")
         email      = (
             session.get("customer_details", {}).get("email")
