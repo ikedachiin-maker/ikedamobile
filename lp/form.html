@@ -370,6 +370,40 @@
     };
   }
 
+
+  function waitForRegistration(ms) {
+    return new Promise(resolve => window.setTimeout(resolve, ms));
+  }
+
+  async function registerPaidApplication(completionPayload) {
+    const retryDelays = [0, 1000, 3000, 7000, 15000, 30000];
+
+    for (const delay of retryDelays) {
+      if (delay) await waitForRegistration(delay);
+
+      try {
+        const completeRes = await fetch("/api/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(completionPayload),
+        });
+
+        let completeData = {};
+        try {
+          completeData = await completeRes.json();
+        } catch (parseError) {
+          console.warn("完了処理の応答を解析できませんでした", parseError);
+        }
+
+        if (completeRes.ok && completeData.status === "recorded") return true;
+        console.warn("完了処理は確認待ちです", completeData);
+      } catch (completeError) {
+        console.warn("完了処理の通信を再試行します", completeError);
+      }
+    }
+
+    return false;
+  }
   // ファイルアップロード
   document.getElementById("document").addEventListener("change", async function() {
     const file = this.files[0];
@@ -456,29 +490,12 @@
       const completionPayload = buildApplicationPayload(plan, lines, email);
       completionPayload.payment_intent_id = paymentIntent.id;
 
-      try {
-        const completeRes = await fetch("/api/complete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(completionPayload),
-        });
-
-        let completeData = {};
-        try {
-          completeData = await completeRes.json();
-        } catch (parseError) {
-          console.warn("完了処理の応答を解析できませんでした", parseError);
-        }
-
-        // 申し込み管理への登録確認が済んだ場合だけ、完了画面を表示する。
-        if (completeRes.ok && completeData.status === "recorded") {
-          document.getElementById("pending-screen").style.display = "none";
-          document.getElementById("success-screen").style.display = "block";
-          sessionStorage.removeItem("ikedamobile-application-id");
-        }
-      } catch (completeError) {
-        // 決済済みのため再決済を促さず、照合キューの自動回収に任せる。
-        console.warn("完了処理は確認待ちです", completeError);
+      // ブラウザ側でも一時的な通信失敗を再試行する。最終保証はStripe Webhook。
+      const registered = await registerPaidApplication(completionPayload);
+      if (registered) {
+        document.getElementById("pending-screen").style.display = "none";
+        document.getElementById("success-screen").style.display = "block";
+        sessionStorage.removeItem("ikedamobile-application-id");
       }
 
     } catch (e) {
