@@ -81,31 +81,32 @@ def main() -> None:
 
     # ── 重複チェック（メールアドレスで同一人物を検出）──────
     # 専用フォーム（構造化データ）を優先し、Googleフォーム側の重複を除外する
-    all_records = gform_records + app_records
-    seen_emails: dict[str, dict] = {}
     records: list[dict] = []
     duplicates_removed = 0
 
-    # 専用フォームを先に処理（優先度が高い）
-    for rec in app_records + gform_records:
+    # 専用フォームの申込は決済ID単位で管理されるため、同じメールアドレスでも
+    # 別決済であればそれぞれ処理する。除外対象はGoogleフォーム側の重複だけ。
+    app_emails: set[str] = set()
+    for rec in app_records:
         email = (rec.get("メールアドレス") or "").strip().lower()
-        if not email:
-            # メールアドレスがないレコードはそのまま通す
-            records.append(rec)
-            continue
-        if email in seen_emails:
-            prev = seen_emails[email]
-            prev_src = "専用フォーム" if prev.get("_source") == "application_sheet" else "Googleフォーム"
-            cur_src  = "専用フォーム" if rec.get("_source") == "application_sheet" else "Googleフォーム"
+        if email:
+            app_emails.add(email)
+        records.append(rec)
+
+    seen_gform_emails: set[str] = set()
+    for rec in gform_records:
+        email = (rec.get("メールアドレス") or "").strip().lower()
+        if email and (email in app_emails or email in seen_gform_emails):
             name = f"{rec.get('姓（漢字）', '')} {rec.get('名（漢字）', '')}".strip() \
                    or rec.get("名前", "")
             print(
                 f"  ⚠️ 重複検出（スキップ）: {name} <{email}> "
-                f"— {cur_src}のレコードを除外（{prev_src}を優先）"
+                "— Googleフォームの重複レコードを除外（専用フォームを優先）"
             )
             duplicates_removed += 1
             continue
-        seen_emails[email] = rec
+        if email:
+            seen_gform_emails.add(email)
         records.append(rec)
 
     if duplicates_removed:
