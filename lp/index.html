@@ -276,7 +276,7 @@
   <!-- 料金表 -->
   <p class="section-title">料金プラン（1回線あたり・税込）</p>
   <div class="price-table">
-    <div class="pt-header">月額料金</div>
+    <div class="pt-header">初期費用（1回線あたり・税込）</div>
     <div class="price-row">
       <span class="label">コンサル生</span>
       <span class="price">¥3,000<span class="unit">/ 回線</span></span>
@@ -291,62 +291,22 @@
     </div>
   </div>
 
-  <!-- 銀行振込 -->
-  <p class="section-title">お支払い方法を選択</p>
-  <div class="card bank-card">
-    <h2>
-      <span class="icon">🏦</span>
-      銀行振込
-    </h2>
-    <div class="bank-info">
-      <dl>
-        <dt>金融機関</dt>
-        <dd>さわやか信用金庫　麻布支店</dd>
-        <dt>種別</dt>
-        <dd>普通</dd>
-        <dt>口座番号</dt>
-        <dd>1245016</dd>
-        <dt>振込金額</dt>
-        <dd>上記プランの金額 × 申込回線数</dd>
-      </dl>
-    </div>
-    <p class="bank-note">
-      ※ 振込確認後にご連絡いたします。<br>
-      ※ 振込名義は申込者のお名前でお願いします。
-    </p>
+  <div class="notice">
+    開通日を1日目として30日間の維持費を初期費用に含みます。<br>
+    <strong>31日目から1回線につき月額660円（税込）</strong>を登録カードに毎月請求します。
   </div>
 
-  <!-- クレジットカード -->
-  <div class="card card-payment">
-    <h2>
-      <span class="icon">💳</span>
-      クレジットカード（Stripe）
-    </h2>
-
-    <a href="/apply?plan=consul" class="stripe-btn btn-consul">
-      <div class="btn-label">コンサル生</div>
-      <div class="btn-price">¥3,000 / 回線</div>
+  <!-- 会員サイトでの新規申し込み -->
+  <div class="card card-payment" style="margin-top: 20px;">
+    <h2><span class="icon">📋</span>新規のお申し込み</h2>
+    <p>お申し込みは会員サイトで受け付けています。初めての方は、移動先の「新規会員登録」を選んでください。</p>
+    <a href="https://members.ikedamobile.com/" class="stripe-btn btn-general" style="margin-top: 16px;">
+      <div class="btn-label">新規会員登録・ログイン</div>
+      <div class="btn-price">会員サイトから申し込む</div>
       <span class="btn-arrow">→</span>
     </a>
-
-    <a href="/apply?plan=online" class="stripe-btn btn-online">
-      <div class="btn-label">オンラインコース生</div>
-      <div class="btn-price">¥3,300 / 回線</div>
-      <span class="btn-arrow">→</span>
-    </a>
-
-    <a href="/apply?plan=general" class="stripe-btn btn-general">
-      <div class="btn-label">一般</div>
-      <div class="btn-price">¥3,600 / 回線</div>
-      <span class="btn-arrow">→</span>
-    </a>
-
-    <div class="stripe-badge">
-      <svg width="40" height="16" viewBox="0 0 60 25" fill="none">
-        <text x="0" y="18" font-size="18" font-family="Arial" font-weight="bold" fill="#635bff">stripe</text>
-      </svg>
-      SSL暗号化通信で安全に決済されます
-    </div>
+    <p>ログイン後にプラン・回線数を選択できます。本人確認書類のアップロードと初期費用のカード決済は、同じ申込画面で行います。</p>
+    <p class="bank-note">既存のご契約・お支払いについてのお問い合わせ：<a href="mailto:ikedachiin@gmail.com">ikedachiin@gmail.com</a></p>
   </div>
 
   <!-- 申し込みフロー -->
@@ -356,21 +316,22 @@
       お申し込みの流れ
     </h2>
     <ol class="flow-steps">
-      <li><span>上記よりプランを選択し、お申し込みフォームへ進む</span></li>
-      <li><span>お客様情報の入力・本人確認書類のアップロード・カード決済を完了する</span></li>
-      <li><span>SIM情報（予約番号・有効期限）をメールでご連絡<span class="auto-tag">自動</span></span></li>
+      <li><span>会員サイトで新規会員登録し、メールの認証コードでログインする</span></li>
+      <li><span>プラン・回線数・お客様情報を入力し、本人確認書類のアップロードと初期費用のカード決済を行う</span></li>
+      <li><span>本人確認・回線の割り当て完了後、利用開始のご案内を確認する</span></li>
     </ol>
   </div>
 
   <div class="notice">
-    ⚠️ お申し込み完了後、SIM情報のメールが届くまでお待ちください。<br>
+    お申し込み後、本人確認・回線の割り当てが完了するまでお待ちください。<br>
     メールが届かない場合は迷惑メールフォルダもご確認ください。
   </div>
 
 </main>
 
 <footer>
-  &copy; 2025 ikedamobile. All rights reserved.
+  <a href="https://members.ikedamobile.com/legal/terms">利用規約</a> · <a href="https://members.ikedamobile.com/legal/privacy">プライバシーポリシー</a> · <a href="https://members.ikedamobile.com/legal/seller">特定商取引法に基づく表記</a><br>
+  &copy; 2026 ikedamobile. All rights reserved.
 </footer>
 
 </body>
