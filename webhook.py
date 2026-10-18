@@ -21,7 +21,7 @@ Stripe Webhook / LP 配信 / 申し込み API サーバー
 import os
 import uuid
 import stripe
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, redirect
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
@@ -47,6 +47,25 @@ LP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lp")
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB（余裕を持たせる）
+
+@app.before_request
+def close_legacy_intake():
+    """Retire new legacy applications while preserving paid-order recovery and uploads."""
+    destination = "https://members.ikedamobile.com/"
+    if request.endpoint == "apply_form":
+        response = redirect(destination, code=302)
+    elif request.endpoint in {"stripe_config", "create_payment_intent"}:
+        response = jsonify({
+            "error": "旧フォームの新規受付は終了しました。会員サイトからお申し込みください。",
+            "code": "legacy_intake_closed",
+            "application_url": destination,
+        })
+        response.status_code = 410
+    else:
+        return None
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 
 def stripe_resource_to_dict(resource):
