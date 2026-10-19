@@ -261,6 +261,20 @@
       padding: 24px;
       border-top: 1px solid #eee;
     }
+
+    .page-nav { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:24px; }
+    .page-nav a { padding:10px 18px; min-height:44px; border:1px solid #fff; border-radius:8px; color:#fff; font-weight:700; text-decoration:none; }
+    .page-nav a:last-child { background:#fff; color:#0f3460; }
+    .member-help { border:2px solid #1a6985; }
+    .member-help a { display:block; color:#0f3460; font-weight:700; font-size:1.05rem; padding:8px 0; }
+    #cancellation { scroll-margin-top:20px; }
+    #cancellation h3 { margin:24px 0 8px; font-size:1rem; color:#0f3460; }
+    #cancellation p { margin:12px 0; }
+    #cancellation .flow-after { counter-reset:step 3; }
+    #cancellation .step-title { display:block; margin-bottom:4px; }
+    #cancellation .step-detail { font-size:.9rem; color:#444; }
+    #cancellation .completion { background:#eef7f5; border-left:4px solid #197466; padding:14px; }
+    a:focus-visible { outline:3px solid #d48600; outline-offset:4px; }
   </style>
 </head>
 <body>
@@ -268,10 +282,12 @@
 <!-- ヘッダー -->
 <header>
   <div class="logo">ikeda<span>mobile</span></div>
-  <p>SIMカードお申し込み・お支払いページ</p>
+  <p>SIMカードのお申し込み・解約のご案内</p>
+<nav class="page-nav" aria-label="お手続き"><a href="#application">お申し込み</a><a href="#cancellation">解約手続き</a></nav>
 </header>
 
 <main>
+  <aside class="card member-help" aria-label="ご契約中のお客様へ"><p>ご契約中のお客様へ</p><a href="#cancellation">解約方法・手続きを見る →</a><p>ログイン後、マイページから対象回線を選んで申請できます。</p></aside>
 
   <!-- 料金表 -->
   <p class="section-title">料金プラン（1回線あたり・税込）</p>
@@ -297,7 +313,7 @@
   </div>
 
   <!-- 会員サイトの新規受付。従来フォーム本体は維持する。 -->
-  <div class="card card-payment">
+  <div class="card card-payment" id="application">
     <h2><span class="icon">📋</span>お申し込み</h2>
     <p>料金をご確認のうえ、会員サイトへお進みください。初めての方は新規会員登録が必要です。</p>
     <a href="https://members.ikedamobile.com/" class="stripe-btn btn-consul">
@@ -338,17 +354,25 @@
 
 
   <section class="card flow-card" id="cancellation" aria-labelledby="cancellation-title">
-    <h2 id="cancellation-title">回線の解約</h2>
-    <p>新会員サイトでお申し込みの回線は、ログイン後のマイページから解約を申請できます。</p>
+    <h2 id="cancellation-title">解約方法・お手続きの流れ</h2>
+    <p>新会員サイトでお申し込みいただいた回線が対象です。<strong>お客様の操作は下記の1〜3で完了します。</strong>その後はシステムが解約手配と完了確認を行います。</p>
+    <h3>お客様が行うこと</h3>
     <ol class="flow-steps">
-      <li><span>会員サイトへログインし、「マイページ」を開く</span></li>
-      <li><span>対象の電話番号を確認し、「この回線の解約を申し込む」を選ぶ</span></li>
-      <li><span>解約予定日と料金条件を確認し、同意して申請する</span></li>
+      <li><div><strong class="step-title">会員サイトへログイン</strong><span class="step-detail">登録済みのメールアドレスとパスワードを入力し、メールに届く6桁の認証コードでログインします。</span></div></li>
+      <li><div><strong class="step-title">マイページで対象回線を選ぶ</strong><span class="step-detail">画面上部の「マイページ」を開き、解約したい電話番号の「この回線の解約を申し込む」を押します。複数回線がある場合は、電話番号をよくご確認ください。</span></div></li>
+      <li><div><strong class="step-title">条件に同意し、解約を申請</strong><span class="step-detail">電話番号・解約予定日・料金条件を確認し、同意欄にチェックを入れて「この回線の解約を申し込む」を押します。「解約申請を受け付けました」と表示されたら受付済みです。</span></div></li>
     </ol>
-    <a href="https://members.ikedamobile.com/" class="stripe-btn btn-general"><div class="btn-label">会員サイトで解約を申請する</div><span class="btn-arrow">→</span></a>
-    <p>通常解約は電話番号を廃止する手続きです。MNP転出をご希望の場合は、通常解約を申請せずお問い合わせください。</p>
-    <p>申請月の月末をプラン有効期限として手配します。受付時点では解約は完了していません。回線終了と課金停止の確認状況はマイページに表示します。</p>
-    <p>旧フォームでのご契約や、回線が表示されない場合は、<a href="mailto:ikedachiin@gmail.com">ikedachiin@gmail.com</a>へお問い合わせください。</p>
+    <a href="https://members.ikedamobile.com/" class="stripe-btn btn-general"><div class="btn-label">ログインして解約手続きを始める</div><span class="btn-arrow">→</span></a>
+    <h3>申請後にシステムが行うこと</h3>
+    <ol class="flow-steps flow-after" start="4">
+      <li><div><strong class="step-title">申請月の月末で解約を手配</strong><span class="step-detail">回線情報を照合し、回線管理システム（JPMOB）のプラン有効期限を申請月の末日に設定します。お客様がJPMOBを操作する必要はありません。</span></div></li>
+      <li><div><strong class="step-title">回線終了・課金停止を確認</strong><span class="step-detail">月末の課金停止を予約し、翌月以降の回線終了と課金停止を照合します。確認できない場合は「確認中」として記録を保持し、運営者が確認します。</span></div></li>
+    </ol>
+    <p class="completion"><strong>完了の確認方法</strong><br>ログイン後のマイページで、対象回線に「回線解約・課金停止を確認済み」と表示されたら完了です。<strong>申請の受付だけでは、解約は完了していません。</strong></p>
+    <h3>申請前にご確認ください</h3>
+    <p>通常解約では電話番号が使えなくなります。他社への乗り換え（MNP）をご希望の場合は、通常解約を申請せずお問い合わせください。</p>
+    <p>申請を受け付けた日本時間の月末をプラン有効期限とし、翌月からの解約を手配します。解約日までに月額請求日が来る場合は、1回線660円（税込）の請求があります。料金条件は申請画面でご確認ください。</p>
+    <p>対象回線や解約ボタンが表示されない場合、旧フォームでのご契約は、<a href="mailto:ikedachiin@gmail.com">ikedachiin@gmail.com</a>へお問い合わせください。</p>
   </section>
 
 </main>
